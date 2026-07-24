@@ -72,3 +72,8 @@ Thumbs.db
 *.tmp
 *.bak
 *.cache
+
+# Reference / external projects
+AstrBot/
+CubismSdkForWeb-5-r.5/
+Live2D_*.md
