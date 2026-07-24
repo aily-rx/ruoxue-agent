@@ -92,6 +92,18 @@ def _strip_action_tags(text: str) -> str:
     return _ACTION_TAG_RE.sub('', text).strip()
 
 
+# Symbols that TTS cannot pronounce or sound bad — strip before synthesis.
+_SYMBOL_RE = re.compile(
+    r'[\*#_`\|>～〜☆★♪♫♥❤→←↑↓▼▲◆◇◎●○◉◎※〓]'
+    r'|(?:\*\*|__|~~|--|——)'
+)
+
+
+def _strip_symbols(text: str) -> str:
+    """Remove markdown formatting and symbols that TTS cannot pronounce."""
+    return _SYMBOL_RE.sub('', text).strip()
+
+
 def _mp3_duration(data: bytes) -> int:
     """Calculate MP3 audio duration in milliseconds from frame count."""
     frame_count = 0
@@ -149,8 +161,10 @@ async def chat(req: ChatRequest):
                 if event == "token":
                     text = data.get("text", "")
                     full_reply += text  # raw for memory
-                    # Strip action tags from display text
+                    # Strip action tags + emoji + symbols from display text
                     clean = _strip_action_tags(text)
+                    clean = _strip_emoji(clean)
+                    clean = _strip_symbols(clean)
                     if clean:
                         yield f"event: token\n"
                         yield f"data: {json.dumps({'text': clean}, ensure_ascii=False)}\n"
@@ -172,9 +186,10 @@ async def chat(req: ChatRequest):
             # ---- Phase 2: TTS + Viseme after LLM reply is complete ----
             if not has_error and full_reply.strip():
                 try:
-                    # Strip emoji + parenthetical action tags — Edge TTS cannot pronounce them
+                    # Strip non-speakable content: emoji, action tags, symbols
                     tts_text = _strip_emoji(full_reply)
                     tts_text = _strip_action_tags(tts_text)
+                    tts_text = _strip_symbols(tts_text)
                     if not tts_text:
                         tts_text = full_reply  # fallback if everything was stripped
 

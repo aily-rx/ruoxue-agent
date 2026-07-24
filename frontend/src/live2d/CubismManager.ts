@@ -231,6 +231,8 @@ export class CubismManager extends CubismUserModel {
             // REQUIRED: set EyeBlink/LipSync effect IDs before doUpdateParameters,
             // otherwise _eyeBlinkParameterIds is null → TypeError.
             motion.setEffectIds(eyeBlinkIds, lipSyncIds);
+            // SDK ignores JSON "Loop":true — must set manually.
+            motion._isLoop = true;
             this._motions.set(motionNames[mi], motion);
             console.log('[Cubism] Motion loaded:', motionNames[mi],
                         'dur:', motion.getDuration().toFixed(1) + 's');
@@ -275,16 +277,15 @@ export class CubismManager extends CubismUserModel {
     this._idleActive = false;
   }
 
-  /** Start idle motion loop — randomly picks mtn_01 or mtn_03, switches every 5-8s. */
+  /** Start idle motion — fixed mtn_01 loop. */
   startIdleMotion(): void {
     this._motionManager.stopAllMotions();
-    var name = Math.random() < 0.5 ? 'mtn_01' : 'mtn_03';
-    var motion = this._motions.get(name);
+    var motion = this._motions.get('mtn_01');
     if (!motion) return;
     this._motionManager.startMotionPriority(motion, false, 0);
-    this._idleTimer = 5 + Math.random() * 8; // 5-13s
+    this._idleTimer = Infinity;  // never auto-switch
     this._idleActive = true;
-    console.log('[Cubism] Idle:', name, 'next:', this._idleTimer.toFixed(1) + 's');
+    console.log('[Cubism] Idle: mtn_01 (fixed)');
   }
 
   getMotionNames(): string[] { return Array.from(this._motions.keys()); }

@@ -28,13 +28,12 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const emotionRef = useRef('');
   const motionTriggeredRef = useRef(false);
 
-  const AGREE_KEYWORDS = ['对', '没错', '是的', '确实', '说得对', '同意', '赞成', '认同', '当然', '正是', '有道理', '我也觉得', '我也是', '好啊', '好的呀', '没问题', '可以的', '行', '可以'];
-  const MAGIC_KEYWORDS = ['魔法', '变个魔法', '变魔法', '施法', '魔术', '变个魔术', '变魔术', '咒语', '法术', '变戏法'];
+  const AGREE_KEYWORDS = ['说得对', '没错', '确实', '同意', '赞成', '认同', '认可', '当然', '正是', '有道理', '我也觉得', '我也是', '好啊', '好的呀', '没问题'];
+  const MAGIC_KEYWORDS = ['魔法', '变魔法', '变个魔法', '施法', '施魔法', '施了魔法', '魔术', '变魔术', '变个魔术', '咒语', '咒', '法术', '变戏法', '魔杖', '变出'];
 
   var detectMotion = function(text: string) {
     if (motionTriggeredRef.current) return;
     var emo = emotionRef.current;
-    if (emo !== 'happy') return;
     for (var i = 0; i < MAGIC_KEYWORDS.length; i++) {
       if (text.indexOf(MAGIC_KEYWORDS[i]) !== -1) {
         motionTriggeredRef.current = true;
@@ -42,11 +41,13 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
         return;
       }
     }
-    for (var i = 0; i < AGREE_KEYWORDS.length; i++) {
-      if (text.indexOf(AGREE_KEYWORDS[i]) !== -1) {
-        motionTriggeredRef.current = true;
-        live2dRef?.current?.playMotion('mtn_02', 1);
-        return;
+    if (emo === 'happy') {
+      for (var i = 0; i < AGREE_KEYWORDS.length; i++) {
+        if (text.indexOf(AGREE_KEYWORDS[i]) !== -1) {
+          motionTriggeredRef.current = true;
+          live2dRef?.current?.playMotion('mtn_02', 1);
+          return;
+        }
       }
     }
   };
@@ -56,7 +57,6 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const scheduleEmotionReset = useCallback(() => {
     if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
     resetTimeoutRef.current = setTimeout(function() {
-      console.log('[ChatPanel] resetting: neutral + idle');
       live2dRef?.current?.setEmotion('neutral', 1.0);
       live2dRef?.current?.startIdleMotion();
       resetTimeoutRef.current = null;
