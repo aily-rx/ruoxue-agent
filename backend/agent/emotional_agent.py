@@ -83,6 +83,7 @@ Correct examples (note: one emotion + one intensity, separated by |):
 [EMOTION: neutral|0.3]北京明天的气温是 25 到 32 度。
 """
 
+
 # Regex to extract emotion tag at the start of a reply
 EMOTION_TAG_RE = re.compile(
     r"^\[EMOTION:\s*(happy|sad|angry|surprised|neutral|thoughtful|worried|excited)\s*\|\s*([\d.]+)\]\s*",

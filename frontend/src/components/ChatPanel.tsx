@@ -1,30 +1,85 @@
 /**
  * Main chat panel: message list + input bar + quick replies + voice input.
+ * Phase 3: audio/viseme buffering for Live2D lip-sync.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useChat } from "../hooks/useChat";
+import { useChat, VisemeFrame } from "../hooks/useChat";
 import { ChatBubble } from "./ChatBubble";
 import { VoiceButton } from "./VoiceButton";
 import { AudioManager } from "../audio/AudioManager";
+import type { Live2DCanvasHandle } from "./Live2DCanvas";
 
 const QUICK_REPLIES = ["你好", "今天天气怎么样", "你能做什么"];
 
-export function ChatPanel() {
-  const audioRef = useRef<AudioManager | null>(null);
+interface PanelProps {
+  onLive2DUpdate?: (data: any) => void;
+  live2dRef?: React.RefObject<Live2DCanvasHandle | null>;
+}
 
-  const handleAudio = useCallback(
-    (base64: string, _format: string, _durationMs: number) => {
-      if (!audioRef.current) {
-        audioRef.current = new AudioManager();
-      }
-      audioRef.current.playBase64(base64);
-    },
-    [],
-  );
+export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
+  const audioRef = useRef<AudioManager | null>(null);
+  const pendingRef = useRef<{ base64?: string; visemes?: VisemeFrame[]; durationMs?: number }>({});
+  const updateRef = useRef(onLive2DUpdate);
+  updateRef.current = onLive2DUpdate;
+
+  // Reset emotion after audio ends (1s delay), cancelled by new message
+  const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleEmotionReset = useCallback(() => {
+    if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = setTimeout(function() {
+      console.log('[ChatPanel] resetting emotion to neutral');
+      live2dRef?.current?.setEmotion('neutral', 1.0);
+      resetTimeoutRef.current = null;
+    }, 1500);  // 1.5s for smoother post-audio transition
+  }, [live2dRef]);
+
+  const playAudio = useCallback((b64: string) => {
+    if (!audioRef.current) audioRef.current = new AudioManager();
+    audioRef.current.stop();
+    audioRef.current.playBase64(b64, scheduleEmotionReset).catch(function(e: Error) {
+      console.error("Audio:", e);
+    });
+  }, [scheduleEmotionReset]);
+
+  const flushPending = useCallback(() => {
+    const p = pendingRef.current;
+    if (p.base64 && p.visemes) {
+      const b64 = p.base64, v = p.visemes, d = p.durationMs ?? 0;
+      pendingRef.current = {};
+      playAudio(b64);
+      updateRef.current?.({ visemes: v, audioDurationMs: d });
+    }
+  }, [playAudio]);
+
+  const handleAudio = useCallback((base64: string, _f: string, durationMs: number) => {
+    pendingRef.current.base64 = base64;
+    pendingRef.current.durationMs = durationMs;
+    flushPending();
+  }, [flushPending]);
+
+  const handleEmotion = useCallback((emotion: string, intensity: number) => {
+    onLive2DUpdate?.({ emotion, intensity });
+  }, [onLive2DUpdate]);
+
+  const handleViseme = useCallback((visemes: VisemeFrame[]) => {
+    pendingRef.current.visemes = visemes;
+    flushPending();
+  }, [flushPending]);
+
+  const handleDone = useCallback(() => {
+    const p = pendingRef.current;
+    if (p.base64 && !p.visemes) {
+      // Audio arrived without visemes — play it (reset handled by audio onended)
+      playAudio(p.base64);
+    }
+    // If audio was already flushed (with visemes), reset is already scheduled by audio onended.
+    // If no audio at all, skip reset — next message will trigger thinking expression.
+    pendingRef.current = {};
+  }, [playAudio]);
 
   const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages } =
-    useChat({ onAudio: handleAudio });
+    useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onViseme: handleViseme, onDone: handleDone });
   const [input, setInput] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -38,21 +93,26 @@ export function ChatPanel() {
 
   const handleSend = useCallback(() => {
     if (!input.trim() || isLoading) return;
-    audioRef.current?.stop(); // Stop any playing audio
+    pendingRef.current = {};
+    audioRef.current?.stop();
+    if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+    live2dRef?.current?.setEmotion('thoughtful', 0.5);
     sendMessage(input);
     setInput("");
-    // Reset textarea height
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
     }
-  }, [input, isLoading, sendMessage]);
+  }, [input, isLoading, sendMessage, live2dRef]);
 
   const handleVoiceRecognized = useCallback(
     (text: string) => {
+      pendingRef.current = {};
       audioRef.current?.stop();
+      if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+      live2dRef?.current?.setEmotion('thoughtful', 0.5);
       sendMessage(text);
     },
-    [sendMessage],
+    [sendMessage, live2dRef],
   );
 
   const handleKeyDown = useCallback(
@@ -68,9 +128,11 @@ export function ChatPanel() {
   const handleQuickReply = useCallback(
     (text: string) => {
       audioRef.current?.stop();
+      if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+      live2dRef?.current?.setEmotion('thoughtful', 0.5);
       sendMessage(text);
     },
-    [sendMessage],
+    [sendMessage, live2dRef],
   );
 
   // Auto-resize textarea

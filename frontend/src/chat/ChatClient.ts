@@ -14,7 +14,7 @@ export interface ChatClientCallbacks {
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
   onAudio?: (base64: string, format: string, durationMs: number) => void;
-  onViseme?: (visemes: Array<{ time_ms: number; level: number }>) => void;
+  onViseme?: (visemes: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -93,7 +93,7 @@ function dispatch(
       );
       break;
     case "viseme":
-      cb.onViseme?.(data as Array<{ time_ms: number; level: number }>);
+      cb.onViseme?.(data as Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>);
       break;
     case "done":
       cb.onDone?.();

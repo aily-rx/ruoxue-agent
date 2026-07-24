@@ -50,10 +50,11 @@ async def synthesize_with_word_boundary(
 
     Returns:
         Tuple of (mp3_bytes, word_boundaries).
+        Each boundary: {"offset": int (100ns units), "duration": int, "text": str}
     """
     communicate = edge_tts.Communicate(
         text, voice, proxy=proxy,
-        boundary="--boundary-type=WordBoundary",
+        boundary="WordBoundary",
     )
     buffer = BytesIO()
     word_boundaries: list[dict] = []

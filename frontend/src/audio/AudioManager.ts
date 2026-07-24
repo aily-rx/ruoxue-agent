@@ -37,7 +37,7 @@ export class AudioManager {
   /**
    * Play audio from base64-encoded MP3 data.
    */
-  async playBase64(base64: string): Promise<void> {
+  async playBase64(base64: string, onPlayEnded?: () => void): Promise<void> {
     this.stop();
 
     try {
@@ -60,6 +60,7 @@ export class AudioManager {
       this._source.onended = () => {
         this._setState("idle");
         this._callbacks.onEnded?.();
+        onPlayEnded?.();
       };
 
       this._source.start(0);

@@ -19,7 +19,7 @@ PORT = int(os.getenv("RUOXUE_PORT", "8000"))
 # --- DeepSeek LLM ---
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "your-api-key-here")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 # LLM parameters
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))

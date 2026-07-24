@@ -9,7 +9,11 @@ import { streamChat } from "../chat/ChatClient";
 
 export interface VisemeFrame {
   time_ms: number;
-  level: number;
+  A: number;
+  I: number;
+  U: number;
+  E: number;
+  O: number;
 }
 
 export interface Message {
@@ -29,6 +33,9 @@ function genId(): string {
 
 export interface UseChatOptions {
   onAudio?: (base64: string, format: string, durationMs: number) => void;
+  onEmotion?: (emotion: string, intensity: number) => void;
+  onViseme?: (visemes: VisemeFrame[]) => void;
+  onDone?: () => void;
 }
 
 export function useChat(options: UseChatOptions = {}) {
@@ -39,6 +46,12 @@ export function useChat(options: UseChatOptions = {}) {
   const sessionId = useRef<string>(genId());
   const onAudioRef = useRef(options.onAudio);
   onAudioRef.current = options.onAudio;
+  const onEmotionRef = useRef(options.onEmotion);
+  onEmotionRef.current = options.onEmotion;
+  const onVisemeRef = useRef(options.onViseme);
+  onVisemeRef.current = options.onViseme;
+  const onDoneRef = useRef(options.onDone);
+  onDoneRef.current = options.onDone;
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -83,6 +96,7 @@ export function useChat(options: UseChatOptions = {}) {
                   m.id === assistantId ? { ...m, emotion, intensity } : m,
                 ),
               );
+              onEmotionRef.current?.(emotion, intensity);
             },
             onToken(token) {
               setMessages((prev) =>
@@ -102,6 +116,7 @@ export function useChat(options: UseChatOptions = {}) {
                   m.id === assistantId ? { ...m, visemes } : m,
                 ),
               );
+              onVisemeRef.current?.(visemes);
             },
             onDone() {
               setMessages((prev) =>
@@ -110,6 +125,7 @@ export function useChat(options: UseChatOptions = {}) {
                 ),
               );
               setIsLoading(false);
+              onDoneRef.current?.();
             },
             onError(msg) {
               setError(msg);
