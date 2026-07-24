@@ -29,10 +29,15 @@ npm run preview      # 预览生产构建
 cd backend
 pip install -r requirements.txt   # 安装 Python 依赖
 
+# 创建 .env 配置文件（填入 DeepSeek API Key）
+cp .env.example .env
+
 # 必须从项目根目录启动（import 使用 backend.xxx 绝对路径）
 cd ..
 python -m backend.main            # 启动 FastAPI 服务 → http://localhost:8000
 ```
+
+> **注意**：`backend/agent/`、`backend/tts/`、`backend/asr/` 均包含空的 `__init__.py`，使其成为 Python 包以支持 `from backend.agent.memory import memory` 等绝对导入路径。
 
 ### 后端自测
 
@@ -121,6 +126,7 @@ App
 - `useChat` hook 管理全部聊天状态：`messages[]`、`isLoading`、`error`
 - 每个 message 对象：`{id, role, content, emotion?, intensity?, isStreaming?, timestamp}`
 - `sessionId` 使用 `useRef` 持久化，同一页面保持同一会话
+- 后端 `session_id` 若前端不传则自动生成 12 位十六进制串（`uuid.uuid4().hex[:12]`）
 
 ## 核心数据流
 
@@ -170,7 +176,7 @@ LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotio
 | `DEEPSEEK_API_KEY` | `your-api-key-here` | DeepSeek API 密钥 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名称 |
 | `LLM_TEMPERATURE` | `0.7` | 生成温度 |
-| `LLM_MAX_TOKENS` | `2048` | 最大 token 数 |
+| `LLM_MAX_TOKENS` | `8192` | 最大 token 数 |
 | `MAX_HISTORY_TURNS` | `20` | 对话历史窗口大小 |
 | `RUOXUE_PORT` | `8000` | 后端端口 |
 
@@ -182,6 +188,8 @@ LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotio
 | Phase 2 | ⏳ 待开发 | 语音交互：SenseVoice ASR + Edge TTS + 麦克风 |
 | Phase 3 | ⏳ 待开发 | Live2D 数字人：模型加载 + 情绪驱动 + 口型同步 |
 | Phase 4 | ⏳ 待开发 | Agent 智能体：LangGraph + 工具调用 + Chroma 记忆 + RAG |
+
+> **当前状态**：Phase 1 完成后暂无正式测试框架（无 pytest / vitest）、无 lint 配置（无 ruff / ESLint）。开发中通过 curl 自测后端 + 浏览器 DevTools 验证前端。
 
 ## 开发顺序约定
 

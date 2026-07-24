@@ -40,6 +40,7 @@ export function streamChat(
 
     const decoder = new TextDecoder();
     let buffer = "";
+    let currentEvent = ""; // Must persist across chunks: FastAPI yields each SSE line separately
 
     while (true) {
       const { done, value } = await reader.read();
@@ -51,7 +52,6 @@ export function streamChat(
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
-      let currentEvent = "";
       for (const line of lines) {
         if (line.startsWith("event: ")) {
           currentEvent = line.slice(7).trim();
