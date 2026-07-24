@@ -19,6 +19,8 @@ export interface Live2DCanvasHandle {
   setEmotion: (emotion: string, intensity: number) => void;
   resetEmotion: () => void;
   playMotion: (name: string, priority?: number) => boolean;
+  stopAllMotions: () => void;
+  startIdleMotion: () => void;
   getMotionNames: () => string[];
 }
 
@@ -39,6 +41,12 @@ export const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(
         },
         playMotion: function(name: string, priority?: number) {
           return manager ? manager.playMotion(name, priority ?? 1) : false;
+        },
+        stopAllMotions: function() {
+          manager?.stopAllMotions();
+        },
+        startIdleMotion: function() {
+          manager?.startIdleMotion();
         },
         getMotionNames: function() {
           return manager ? manager.getMotionNames() : [];

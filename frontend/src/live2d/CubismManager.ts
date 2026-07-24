@@ -46,6 +46,10 @@ export class CubismManager extends CubismUserModel {
   idleMotionDriver = new IdleMotionDriver();
   onStateChange?: (state: Live2DState) => void;
 
+  // Motion-based idle state
+  private _idleTimer: number = 0;
+  private _idleActive: boolean = false;
+
   private static _frameworkStarted = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -242,6 +246,7 @@ export class CubismManager extends CubismUserModel {
       this._state = { loaded: true, error: null };
       this.onStateChange?.(this._state);
       this._startLoop();
+      this.startIdleMotion();  // begin motion-based idle after load
       console.log('[Cubism] Loaded OK');
     } catch (err) {
       var msg = (err as Error).message || String(err);
@@ -258,8 +263,28 @@ export class CubismManager extends CubismUserModel {
   playMotion(name: string, priority: number = 1): boolean {
     var motion = this._motions.get(name);
     if (!motion) { console.warn('[Cubism] Motion not found:', name); return false; }
+    // Stop all existing motions first to avoid multi-motion conflict
+    this._motionManager.stopAllMotions();
     this._motionManager.startMotionPriority(motion, false, priority);
+    console.log('[Cubism] Motion:', name, 'pri:', priority);
     return true;
+  }
+
+  stopAllMotions(): void {
+    this._motionManager.stopAllMotions();
+    this._idleActive = false;
+  }
+
+  /** Start idle motion loop — randomly picks mtn_01 or mtn_03, switches every 5-8s. */
+  startIdleMotion(): void {
+    this._motionManager.stopAllMotions();
+    var name = Math.random() < 0.5 ? 'mtn_01' : 'mtn_03';
+    var motion = this._motions.get(name);
+    if (!motion) return;
+    this._motionManager.startMotionPriority(motion, false, 0);
+    this._idleTimer = 5 + Math.random() * 8; // 5-13s
+    this._idleActive = true;
+    console.log('[Cubism] Idle:', name, 'next:', this._idleTimer.toFixed(1) + 's');
   }
 
   getMotionNames(): string[] { return Array.from(this._motions.keys()); }
@@ -305,11 +330,19 @@ export class CubismManager extends CubismUserModel {
           ? Math.min((n - self._lastFrameTime) / 1000, 0.1) // cap at 100ms to avoid physics burst
           : 0.016;
         self._lastFrameTime = n;
-        self.lipSyncDriver.update(n);
-        self.emotionDriver.update(n);
-        self.idleMotionDriver.update(dt);
-        // Motion playback — updates model params via CubismMotionManager
+        // Motion-based idle timer — switch motion when expired
+        if (self._idleActive && self._model) {
+          self._idleTimer -= dt;
+          if (self._idleTimer <= 0) {
+            self.startIdleMotion();
+          }
+        }
+
+        // Render order: motion (base) → emotion (face override) → lip-sync (mouth override)
+        // This prevents motion from overwriting expression or lip-sync params.
         self._motionManager.updateMotion(self._model, dt);
+        self.emotionDriver.update(n);
+        self.lipSyncDriver.update(n);
         // Run SDK update scheduler: physics, pose, eye blink updaters
         self._updateScheduler.onLateUpdate(self._model, dt);
         self._model.update();

@@ -23,15 +23,44 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const updateRef = useRef(onLive2DUpdate);
   updateRef.current = onLive2DUpdate;
 
-  // Reset emotion after audio ends (1s delay), cancelled by new message
+  // Motion context detection
+  const replyBufferRef = useRef('');
+  const emotionRef = useRef('');
+  const motionTriggeredRef = useRef(false);
+
+  const AGREE_KEYWORDS = ['对', '没错', '是的', '确实', '说得对', '同意', '赞成', '认同', '当然', '正是', '有道理', '我也觉得', '我也是', '好啊', '好的呀', '没问题', '可以的', '行', '可以'];
+  const MAGIC_KEYWORDS = ['魔法', '变个魔法', '变魔法', '施法', '魔术', '变个魔术', '变魔术', '咒语', '法术', '变戏法'];
+
+  var detectMotion = function(text: string) {
+    if (motionTriggeredRef.current) return;
+    var emo = emotionRef.current;
+    if (emo !== 'happy') return;
+    for (var i = 0; i < MAGIC_KEYWORDS.length; i++) {
+      if (text.indexOf(MAGIC_KEYWORDS[i]) !== -1) {
+        motionTriggeredRef.current = true;
+        live2dRef?.current?.playMotion('special_01', 1);
+        return;
+      }
+    }
+    for (var i = 0; i < AGREE_KEYWORDS.length; i++) {
+      if (text.indexOf(AGREE_KEYWORDS[i]) !== -1) {
+        motionTriggeredRef.current = true;
+        live2dRef?.current?.playMotion('mtn_02', 1);
+        return;
+      }
+    }
+  };
+
+  // Reset emotion after audio ends, restart idle motion
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleEmotionReset = useCallback(() => {
     if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
     resetTimeoutRef.current = setTimeout(function() {
-      console.log('[ChatPanel] resetting emotion to neutral');
+      console.log('[ChatPanel] resetting: neutral + idle');
       live2dRef?.current?.setEmotion('neutral', 1.0);
+      live2dRef?.current?.startIdleMotion();
       resetTimeoutRef.current = null;
-    }, 1500);  // 1.5s for smoother post-audio transition
+    }, 1500);
   }, [live2dRef]);
 
   const playAudio = useCallback((b64: string) => {
@@ -59,8 +88,14 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   }, [flushPending]);
 
   const handleEmotion = useCallback((emotion: string, intensity: number) => {
+    emotionRef.current = emotion;  // capture for motion detection
     onLive2DUpdate?.({ emotion, intensity });
   }, [onLive2DUpdate]);
+
+  const handleToken = useCallback((token: string) => {
+    replyBufferRef.current += token;
+    detectMotion(replyBufferRef.current);
+  }, []);
 
   const handleViseme = useCallback((visemes: VisemeFrame[]) => {
     pendingRef.current.visemes = visemes;
@@ -79,7 +114,7 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   }, [playAudio]);
 
   const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages } =
-    useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onViseme: handleViseme, onDone: handleDone });
+    useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onToken: handleToken, onViseme: handleViseme, onDone: handleDone });
   const [input, setInput] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -96,6 +131,11 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     pendingRef.current = {};
     audioRef.current?.stop();
     if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+    // Reset motion state for new reply
+    replyBufferRef.current = '';
+    emotionRef.current = '';
+    motionTriggeredRef.current = false;
+    live2dRef?.current?.stopAllMotions();
     live2dRef?.current?.setEmotion('thoughtful', 0.5);
     sendMessage(input);
     setInput("");
@@ -109,6 +149,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
       pendingRef.current = {};
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+      replyBufferRef.current = '';
+      emotionRef.current = '';
+      motionTriggeredRef.current = false;
+      live2dRef?.current?.stopAllMotions();
       live2dRef?.current?.setEmotion('thoughtful', 0.5);
       sendMessage(text);
     },
@@ -129,6 +173,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     (text: string) => {
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+      replyBufferRef.current = '';
+      emotionRef.current = '';
+      motionTriggeredRef.current = false;
+      live2dRef?.current?.stopAllMotions();
       live2dRef?.current?.setEmotion('thoughtful', 0.5);
       sendMessage(text);
     },

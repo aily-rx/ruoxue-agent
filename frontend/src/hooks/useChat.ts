@@ -34,6 +34,7 @@ function genId(): string {
 export interface UseChatOptions {
   onAudio?: (base64: string, format: string, durationMs: number) => void;
   onEmotion?: (emotion: string, intensity: number) => void;
+  onToken?: (text: string) => void;
   onViseme?: (visemes: VisemeFrame[]) => void;
   onDone?: () => void;
 }
@@ -48,6 +49,8 @@ export function useChat(options: UseChatOptions = {}) {
   onAudioRef.current = options.onAudio;
   const onEmotionRef = useRef(options.onEmotion);
   onEmotionRef.current = options.onEmotion;
+  const onTokenRef = useRef(options.onToken);
+  onTokenRef.current = options.onToken;
   const onVisemeRef = useRef(options.onViseme);
   onVisemeRef.current = options.onViseme;
   const onDoneRef = useRef(options.onDone);
@@ -106,6 +109,7 @@ export function useChat(options: UseChatOptions = {}) {
                     : m,
                 ),
               );
+              onTokenRef.current?.(token);
             },
             onAudio(base64, format, durationMs) {
               onAudioRef.current?.(base64, format, durationMs);
