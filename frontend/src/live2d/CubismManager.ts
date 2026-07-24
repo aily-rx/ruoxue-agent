@@ -17,6 +17,7 @@ import { CubismPhysicsUpdater } from './sdk/motion/cubismphysicsupdater';
 import { CubismPoseUpdater } from './sdk/motion/cubismposeupdater';
 import { CubismEyeBlinkUpdater } from './sdk/motion/cubismeyeblinkupdater';
 import { CubismEyeBlink } from './sdk/effect/cubismeyeblink';
+import { CubismMotion } from './sdk/motion/cubismmotion';
 import { EmotionDriver } from './EmotionDriver';
 import { LipSyncDriver } from './LipSyncDriver';
 import { IdleMotionDriver } from './IdleMotionDriver';
@@ -35,6 +36,7 @@ export class CubismManager extends CubismUserModel {
   private _disposed = false;
   private _resizeObserver: ResizeObserver | null = null;
   private _expressions: Array<{ name: string; motion: any }> = [];
+  private _motions: Map<string, CubismMotion> = new Map();
   private _modelSetting: CubismModelSettingJson | null = null;
   private _updateScheduler = new CubismUpdateScheduler();
   private _lastFrameTime = 0;
@@ -203,7 +205,37 @@ export class CubismManager extends CubismUserModel {
         } catch (e) {}
       }
 
-      // 7. Drivers
+      // 8. Motions — load all .motion3.json files with effect IDs for EyeBlink/LipSync
+      var motionNames = ['mtn_01', 'mtn_02', 'mtn_03', 'mtn_04', 'special_01', 'special_02', 'special_03'];
+      // Collect eye blink and lip sync parameter IDs for setEffectIds (required before doUpdateParameters)
+      var eyeBlinkIds: any[] = [];
+      var lipSyncIds: any[] = [];
+      for (var bi = 0; bi < this._modelSetting.getEyeBlinkParameterCount(); bi++) {
+        eyeBlinkIds.push(this._modelSetting.getEyeBlinkParameterId(bi));
+      }
+      for (var li = 0; li < this._modelSetting.getLipSyncParameterCount(); li++) {
+        lipSyncIds.push(this._modelSetting.getLipSyncParameterId(li));
+      }
+      for (var mi = 0; mi < motionNames.length; mi++) {
+        try {
+          var motionUrl = baseUrl + 'motions/' + motionNames[mi] + '.motion3.json';
+          var mr = await fetch(motionUrl);
+          if (!mr.ok) continue;
+          var mb = await mr.arrayBuffer();
+          var motion = CubismMotion.create(mb, mb.byteLength);
+          if (motion) {
+            // REQUIRED: set EyeBlink/LipSync effect IDs before doUpdateParameters,
+            // otherwise _eyeBlinkParameterIds is null → TypeError.
+            motion.setEffectIds(eyeBlinkIds, lipSyncIds);
+            this._motions.set(motionNames[mi], motion);
+            console.log('[Cubism] Motion loaded:', motionNames[mi],
+                        'dur:', motion.getDuration().toFixed(1) + 's');
+          }
+        } catch (e) { console.log('[Cubism] Motion skip:', motionNames[mi]); }
+      }
+      console.log('[Cubism] Motions loaded:', this._motions.size);
+
+      // 9. Drivers
       this.emotionDriver.attach(this._model, this._expressions);
       this.lipSyncDriver.attach(this._model);
 
@@ -223,13 +255,24 @@ export class CubismManager extends CubismUserModel {
   startLipSync(t: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>, d: number) { this.lipSyncDriver.start(t, d); }
   stopLipSync() { this.lipSyncDriver.stop(); }
 
+  playMotion(name: string, priority: number = 1): boolean {
+    var motion = this._motions.get(name);
+    if (!motion) { console.warn('[Cubism] Motion not found:', name); return false; }
+    this._motionManager.startMotionPriority(motion, false, priority);
+    return true;
+  }
+
+  getMotionNames(): string[] { return Array.from(this._motions.keys()); }
+
   dispose(): void {
     this._disposed = true;
     this._stopLoop();
     this.lipSyncDriver.detach();
     this.emotionDriver.detach();
     this.idleMotionDriver.detach();
-    this.release();  // CubismUserModel.release() handles moc/model/renderer cleanup
+    this._motions.forEach(function(m) { m.release(); });
+    this._motions.clear();
+    this.release();
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
       this._resizeObserver = null;
@@ -265,6 +308,8 @@ export class CubismManager extends CubismUserModel {
         self.lipSyncDriver.update(n);
         self.emotionDriver.update(n);
         self.idleMotionDriver.update(dt);
+        // Motion playback — updates model params via CubismMotionManager
+        self._motionManager.updateMotion(self._model, dt);
         // Run SDK update scheduler: physics, pose, eye blink updaters
         self._updateScheduler.onLateUpdate(self._model, dt);
         self._model.update();

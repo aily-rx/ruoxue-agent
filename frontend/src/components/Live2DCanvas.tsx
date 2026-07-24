@@ -18,6 +18,8 @@ interface Live2DCanvasProps {
 export interface Live2DCanvasHandle {
   setEmotion: (emotion: string, intensity: number) => void;
   resetEmotion: () => void;
+  playMotion: (name: string, priority?: number) => boolean;
+  getMotionNames: () => string[];
 }
 
 export const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(
@@ -26,7 +28,7 @@ export const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(
     var canvasRef = useRef<HTMLCanvasElement>(null);
     var { state, manager } = useLive2D(canvasRef, modelPath);
 
-    // Expose synchronous setEmotion via ref
+    // Expose synchronous API via ref
     useImperativeHandle(ref, function() {
       return {
         setEmotion: function(e: string, i: number) {
@@ -34,6 +36,12 @@ export const Live2DCanvas = forwardRef<Live2DCanvasHandle, Live2DCanvasProps>(
         },
         resetEmotion: function() {
           manager?.emotionDriver.reset();
+        },
+        playMotion: function(name: string, priority?: number) {
+          return manager ? manager.playMotion(name, priority ?? 1) : false;
+        },
+        getMotionNames: function() {
+          return manager ? manager.getMotionNames() : [];
         },
       };
     }, [manager]);
