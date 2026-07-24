@@ -1,0 +1,74 @@
+# ==================== Python / Backend ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+.conda/
+*.log
+
+# Environment & Config (keep .example files)
+backend/.env
+.env.local
+.env.*.local
+*.ini
+
+# ==================== Node / Frontend ====================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite cache
+.vite/
+
+# ==================== Large Files / Assets ====================
+# Archives
+*.zip
+*.7z
+*.rar
+*.tar.gz
+*.tar
+
+# 3D Models
+*.glb
+*.gltf
+*.bin
+*.fbx
+*.obj
+*.mtl
+*.blend
+*.dae
+
+# Model assets directory
+model_asssets/
+
+# ML / AI model files
+*.h5
+*.pb
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.gguf
+
+# ==================== IDE / Editor ====================
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==================== Misc ====================
+*.tmp
+*.bak
+*.cache
