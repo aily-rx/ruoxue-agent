@@ -7,3 +7,6 @@ pydantic>=2.0
 httpx>=0.28
 python-multipart>=0.0.9
 python-dotenv>=1.0
+edge-tts>=6.1
+sherpa-onnx>=1.10
+pypinyin>=0.50

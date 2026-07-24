@@ -1,16 +1,30 @@
 /**
- * Main chat panel: message list + input bar + quick replies.
+ * Main chat panel: message list + input bar + quick replies + voice input.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../hooks/useChat";
 import { ChatBubble } from "./ChatBubble";
+import { VoiceButton } from "./VoiceButton";
+import { AudioManager } from "../audio/AudioManager";
 
 const QUICK_REPLIES = ["你好", "今天天气怎么样", "你能做什么"];
 
 export function ChatPanel() {
+  const audioRef = useRef<AudioManager | null>(null);
+
+  const handleAudio = useCallback(
+    (base64: string, _format: string, _durationMs: number) => {
+      if (!audioRef.current) {
+        audioRef.current = new AudioManager();
+      }
+      audioRef.current.playBase64(base64);
+    },
+    [],
+  );
+
   const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages } =
-    useChat();
+    useChat({ onAudio: handleAudio });
   const [input, setInput] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -24,6 +38,7 @@ export function ChatPanel() {
 
   const handleSend = useCallback(() => {
     if (!input.trim() || isLoading) return;
+    audioRef.current?.stop(); // Stop any playing audio
     sendMessage(input);
     setInput("");
     // Reset textarea height
@@ -31,6 +46,14 @@ export function ChatPanel() {
       inputRef.current.style.height = "auto";
     }
   }, [input, isLoading, sendMessage]);
+
+  const handleVoiceRecognized = useCallback(
+    (text: string) => {
+      audioRef.current?.stop();
+      sendMessage(text);
+    },
+    [sendMessage],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -44,6 +67,7 @@ export function ChatPanel() {
 
   const handleQuickReply = useCallback(
     (text: string) => {
+      audioRef.current?.stop();
       sendMessage(text);
     },
     [sendMessage],
@@ -112,6 +136,10 @@ export function ChatPanel() {
 
       {/* Input bar */}
       <footer className="input-bar">
+        <VoiceButton
+          onRecognized={handleVoiceRecognized}
+          disabled={isLoading}
+        />
         <textarea
           ref={inputRef}
           className="chat-input"

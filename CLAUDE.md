@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Ruoxue** — 基于 React + Live2D + LangChain + FastAPI 构建的本地多模态 AI Agent 数字人助手。
 
-- **当前阶段**：Phase 1（文字聊天）已完成。Phase 2（语音）、Phase 3（Live2D 数字人）、Phase 4（Agent 工具/LangGraph）待开发。
-- **前端**：React 18 + TypeScript + Vite 6，端口 5173，通过 Vite proxy 将 `/api` 转发到 localhost:8000。
+- **当前阶段**：Phase 1（文字聊天）已完成。Phase 2（语音）已搭建 `backend/tts/` 和 `backend/asr/` 目录脚手架，在当前分支 `feature/tts+ars` 上进行实现。Phase 3（Live2D 数字人）、Phase 4（Agent 工具/LangGraph）待开发。
+- **前端**：React 18 + TypeScript（strict 模式）+ Vite 6，端口 5173，通过 Vite proxy 将 `/api` 转发到 localhost:8000。
 - **后端**：Python FastAPI + LangChain + langchain-openai，调用 DeepSeek API，端口 8000。
-- **设计令牌**：紫色主色 `#7c5cbf`，定义在 `frontend/src/style.css` 的 `:root` 中，禁止硬编码颜色/间距。
+- **设计令牌**：紫色主色 `#7c5cbf`，定义在 `frontend/src/style.css` 的 `:root` 中，禁止硬编码颜色/间距。关键变量：`--primary` / `--primary-hover` / `--primary-light`、`--surface` / `--surface-alt` / `--bg`、`--text` / `--text-secondary` / `--text-muted`、`--border`、`--radius` / `--radius-sm`、`--shadow`、`--header-h: 56px`、`--bubble-max-w: 70%`。
 
 ## 常用命令
 
@@ -180,12 +180,32 @@ LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotio
 | `MAX_HISTORY_TURNS` | `20` | 对话历史窗口大小 |
 | `RUOXUE_PORT` | `8000` | 后端端口 |
 
+## 已知陷阱
+
+### SSE 跨 chunk 事件类型丢失
+
+**症状**：流式对话中部分或全部 token 被静默丢弃，回复显示不完整。
+
+**根因**：FastAPI `StreamingResponse` 可能将一个 SSE 事件的 `event:` 行和 `data:` 行分到不同的网络 chunk 发送。`ChatClient.ts` 逐 chunk 读取，如果 `currentEvent` 变量在 `while(true)` 循环内声明，每次迭代都会被重置，导致跨 chunk 时事件类型丢失。
+
+**修复**：将 `currentEvent` 声明提升到 `while(true)` 循环之前：
+
+```typescript
+let currentEvent = "";  // ← 必须在 while 循环外部
+while (true) {
+  const { done, value } = await reader.read();
+  // ...
+}
+```
+
+**教训**：SSE 解析器的状态变量（事件类型、buffer）必须跨 chunk 持久化。在 `while(true)` 循环内声明的任何变量都将在每次 `reader.read()` 调用时重新初始化。
+
 ## 阶段规划
 
 | 阶段 | 状态 | 内容 |
 |---|---|---|
 | Phase 1 | ✅ 完成 | 文字聊天：SSE 流式对话 + 情绪标签 + 会话记忆 |
-| Phase 2 | ⏳ 待开发 | 语音交互：SenseVoice ASR + Edge TTS + 麦克风 |
+| Phase 2 | 🚧 开发中 | 语音交互：SenseVoice ASR + Edge TTS + 麦克风（`feature/tts+ars` 分支） |
 | Phase 3 | ⏳ 待开发 | Live2D 数字人：模型加载 + 情绪驱动 + 口型同步 |
 | Phase 4 | ⏳ 待开发 | Agent 智能体：LangGraph + 工具调用 + Chroma 记忆 + RAG |
 
@@ -202,7 +222,7 @@ LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotio
 
 ## AstrBot 目录
 
-`AstrBot/` 是一个独立的开源项目（v4.26.7，AGPL-3.0），作为多平台 LLM 聊天机器人框架的参考模板。它有自己的 `AGENTS.md` 和开发规范，不应与本项目代码混淆。
+`AstrBot/` 是一个独立的开源项目（v4.26.7，AGPL-3.0），作为多平台 LLM 聊天机器人框架的参考模板。**它不是 Ruoxue 源码的一部分**，不作为 Ruoxue 构建内容，也不应被修改。它有自己的 `AGENTS.md` 和独立的开发工作流。
 
 ## 文档索引
 

@@ -7,6 +7,11 @@
 import { useCallback, useRef, useState } from "react";
 import { streamChat } from "../chat/ChatClient";
 
+export interface VisemeFrame {
+  time_ms: number;
+  level: number;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -15,18 +20,25 @@ export interface Message {
   intensity?: number;
   isStreaming?: boolean;
   timestamp: number;
+  visemes?: VisemeFrame[];
 }
 
 function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-export function useChat() {
+export interface UseChatOptions {
+  onAudio?: (base64: string, format: string, durationMs: number) => void;
+}
+
+export function useChat(options: UseChatOptions = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const sessionId = useRef<string>(genId());
+  const onAudioRef = useRef(options.onAudio);
+  onAudioRef.current = options.onAudio;
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -78,6 +90,16 @@ export function useChat() {
                   m.id === assistantId
                     ? { ...m, content: m.content + token }
                     : m,
+                ),
+              );
+            },
+            onAudio(base64, format, durationMs) {
+              onAudioRef.current?.(base64, format, durationMs);
+            },
+            onViseme(visemes) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, visemes } : m,
                 ),
               );
             },

@@ -18,8 +18,16 @@ from backend.routes import router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    # Phase 2: preload ASR model here
     print("[Ruoxue] Server starting...")
+
+    # Phase 2: preload ASR model at startup
+    try:
+        from backend.asr.asr_service import asr_service
+        asr_service.load_model()
+    except Exception as exc:
+        print(f"[Ruoxue] WARNING: ASR model not loaded: {exc}")
+        print("[Ruoxue] Text chat will still work; voice features disabled.")
+
     yield
     print("[Ruoxue] Server shutting down...")
 
@@ -27,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Ruoxue AI Agent",
     description="2D AI Agent digital human backend",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

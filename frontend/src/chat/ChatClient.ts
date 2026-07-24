@@ -7,12 +7,14 @@
 
 export interface SSEEvent {
   event: string;
-  data: Record<string, unknown>;
+  data: unknown;
 }
 
 export interface ChatClientCallbacks {
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
+  onAudio?: (base64: string, format: string, durationMs: number) => void;
+  onViseme?: (visemes: Array<{ time_ms: number; level: number }>) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -72,21 +74,32 @@ export function streamChat(
 
 function dispatch(
   event: string,
-  data: Record<string, unknown>,
+  data: unknown,
   cb: ChatClientCallbacks,
 ): void {
+  const d = data as Record<string, unknown>;
   switch (event) {
     case "emotion":
-      cb.onEmotion?.(data.emotion as string, data.intensity as number);
+      cb.onEmotion?.(d.emotion as string, d.intensity as number);
       break;
     case "token":
-      cb.onToken?.(data.text as string);
+      cb.onToken?.(d.text as string);
+      break;
+    case "audio":
+      cb.onAudio?.(
+        d.base64 as string,
+        (d.format as string) || "mp3",
+        (d.duration_ms as number) || 0,
+      );
+      break;
+    case "viseme":
+      cb.onViseme?.(data as Array<{ time_ms: number; level: number }>);
       break;
     case "done":
       cb.onDone?.();
       break;
     case "error":
-      cb.onError?.(data.message as string);
+      cb.onError?.(d.message as string);
       break;
   }
 }

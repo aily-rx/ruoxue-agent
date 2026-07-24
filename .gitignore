@@ -48,7 +48,7 @@ pnpm-debug.log*
 *.dae
 
 # Model assets directory
-model_asssets/
+model_assets/
 
 # ML / AI model files
 *.h5

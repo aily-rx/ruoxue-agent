@@ -30,6 +30,11 @@ MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "20"))
 
 # --- TTS (Phase 2) ---
 TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+# HTTP proxy for Edge TTS (needed if speech.platform.bing.com is blocked)
+# Example: "http://127.0.0.1:7890"
+TTS_PROXY = os.getenv("TTS_PROXY", os.getenv("HTTP_PROXY", os.getenv("http_proxy", ""))) or None
 
 # --- ASR (Phase 2) ---
-ASR_MODEL_DIR = os.getenv("ASR_MODEL_DIR", "../model_assets/asr/sensevoice-small-int8")
+# Default path is resolved relative to this config file (backend/ → project root)
+_ASR_DEFAULT = str(Path(__file__).resolve().parent.parent / "model_assets" / "asr" / "sensevoice-small-int8")
+ASR_MODEL_DIR = os.getenv("ASR_MODEL_DIR", _ASR_DEFAULT)
