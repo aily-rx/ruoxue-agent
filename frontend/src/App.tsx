@@ -13,8 +13,6 @@ const MODEL_PATH = "/live2d/mao_zh_Hans/mao_pro.model3.json";
 interface Live2DData {
   emotion?: string;
   intensity?: number;
-  visemes?: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>;
-  audioDurationMs?: number;
 }
 
 export default function App() {
@@ -37,8 +35,6 @@ export default function App() {
             modelPath={MODEL_PATH}
             emotion={data.emotion}
             intensity={data.intensity}
-            visemes={data.visemes}
-            audioDurationMs={data.audioDurationMs}
           />
         </div>
       </div>

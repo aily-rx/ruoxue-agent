@@ -20,7 +20,6 @@ import { CubismEyeBlink } from './sdk/effect/cubismeyeblink';
 import { CubismMotion } from './sdk/motion/cubismmotion';
 import { EmotionDriver } from './EmotionDriver';
 import { LipSyncDriver } from './LipSyncDriver';
-import { IdleMotionDriver } from './IdleMotionDriver';
 
 export interface Live2DState {
   loaded: boolean;
@@ -43,7 +42,6 @@ export class CubismManager extends CubismUserModel {
 
   emotionDriver = new EmotionDriver();
   lipSyncDriver = new LipSyncDriver();
-  idleMotionDriver = new IdleMotionDriver();
   onStateChange?: (state: Live2DState) => void;
 
   // Motion-based idle state
@@ -194,10 +192,6 @@ export class CubismManager extends CubismUserModel {
         }
       } catch (e) { console.log('[Cubism] EyeBlink skipped:', (e as Error).message); }
 
-      // 6c. Idle motion — random organic movement (replaces mechanical sine-wave breath)
-      this.idleMotionDriver.attach(this._model);
-      console.log('[Cubism] Idle motion attached');
-
       // 7. Expressions
       for (var i = 0; i < this._modelSetting.getExpressionCount(); i++) {
         try {
@@ -241,7 +235,7 @@ export class CubismManager extends CubismUserModel {
       }
       console.log('[Cubism] Motions loaded:', this._motions.size);
 
-      // 9. Drivers
+      // 8. Drivers
       this.emotionDriver.attach(this._model, this._expressions);
       this.lipSyncDriver.attach(this._model);
 
@@ -259,7 +253,7 @@ export class CubismManager extends CubismUserModel {
     } finally { this._loading = false; }
   }
 
-  startLipSync(t: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>, d: number) { this.lipSyncDriver.start(t, d); }
+  startLipSync(t: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>, d: number, startTime?: number) { this.lipSyncDriver.start(t, d, startTime); }
   stopLipSync() { this.lipSyncDriver.stop(); }
 
   playMotion(name: string, priority: number = 1): boolean {
@@ -295,7 +289,6 @@ export class CubismManager extends CubismUserModel {
     this._stopLoop();
     this.lipSyncDriver.detach();
     this.emotionDriver.detach();
-    this.idleMotionDriver.detach();
     this._motions.forEach(function(m) { m.release(); });
     this._motions.clear();
     this.release();

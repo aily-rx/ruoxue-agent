@@ -36,8 +36,17 @@ export class AudioManager {
 
   /**
    * Play audio from base64-encoded MP3 data.
+   *
+   * @param base64 - Base64-encoded MP3 audio.
+   * @param onPlayEnded - Called when playback finishes naturally.
+   * @param onPlayStarted - Called when audio actually begins playing (after async decode).
+   *                        Receives the AudioContext.currentTime at start moment.
    */
-  async playBase64(base64: string, onPlayEnded?: () => void): Promise<void> {
+  async playBase64(
+    base64: string,
+    onPlayEnded?: () => void,
+    onPlayStarted?: (contextTime: number) => void,
+  ): Promise<void> {
     this.stop();
 
     try {
@@ -65,6 +74,10 @@ export class AudioManager {
 
       this._source.start(0);
       this._setState("playing");
+      // Fire onPlayStarted AFTER source.start() — captures the exact AudioContext time
+      // when playback begins. Use performance.now() as the bridge between Web Audio
+      // timeline and the render loop's requestAnimationFrame timer.
+      onPlayStarted?.(ctx.currentTime);
     } catch (err) {
       this._setState("idle");
       this._callbacks.onError?.(err as Error);

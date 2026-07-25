@@ -36,10 +36,12 @@ export class LipSyncDriver {
   detach(): void { this.stop(); this._model = null; this._ids = {}; }
   get isActive(): boolean { return this._active; }
 
-  start(timeline: VisemeFrame[], durationMs: number): void {
+  start(timeline: VisemeFrame[], durationMs: number, startTime?: number): void {
     this._timeline = timeline;
     this._durationMs = durationMs || 3000;
-    this._startTime = performance.now();
+    // Use provided startTime (performance.now() captured at audio playback start),
+    // otherwise fall back to current time (backward compat for non-audio-driven calls).
+    this._startTime = startTime ?? performance.now();
     this._active = true;
     this._prevFrame = null;
     this._smooth = {};  // reset smoothing

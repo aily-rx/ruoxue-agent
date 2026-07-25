@@ -23,31 +23,34 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const updateRef = useRef(onLive2DUpdate);
   updateRef.current = onLive2DUpdate;
 
-  // Motion context detection
-  const replyBufferRef = useRef('');
+  // Motion context detection — analyses user's message, not AI's reply
+  const userMessageRef = useRef('');
   const emotionRef = useRef('');
   const motionTriggeredRef = useRef(false);
 
-  const AGREE_KEYWORDS = ['说得对', '没错', '确实', '同意', '赞成', '认同', '认可', '当然', '正是', '有道理', '我也觉得', '我也是', '好啊', '好的呀', '没问题'];
+  // User expresses agreement/approval/recognition TOWARD the AI
+  const USER_AGREE_KEYWORDS = ['认可', '认同', '说得对', '没错', '有道理', '你真棒', '你好厉害', '喜欢你', '厉害', '好聪明', '不错', '挺好的', '很好', '真不错', '太棒了'];
   const MAGIC_KEYWORDS = ['魔法', '变魔法', '变个魔法', '施法', '施魔法', '施了魔法', '魔术', '变魔术', '变个魔术', '咒语', '咒', '法术', '变戏法', '魔杖', '变出'];
 
-  var detectMotion = function(text: string) {
+  var detectMotion = function() {
     if (motionTriggeredRef.current) return;
-    var emo = emotionRef.current;
+    var userMsg = userMessageRef.current;
+    // Magic keywords in user's message -> special_01
     for (var i = 0; i < MAGIC_KEYWORDS.length; i++) {
-      if (text.indexOf(MAGIC_KEYWORDS[i]) !== -1) {
+      if (userMsg.indexOf(MAGIC_KEYWORDS[i]) !== -1) {
         motionTriggeredRef.current = true;
+        console.log('[Motion] TRIGGER special_01 | keyword:', MAGIC_KEYWORDS[i], '| user:', userMsg.slice(-40));
         live2dRef?.current?.playMotion('special_01', 1);
         return;
       }
     }
-    if (emo === 'happy') {
-      for (var i = 0; i < AGREE_KEYWORDS.length; i++) {
-        if (text.indexOf(AGREE_KEYWORDS[i]) !== -1) {
-          motionTriggeredRef.current = true;
-          live2dRef?.current?.playMotion('mtn_02', 1);
-          return;
-        }
+    // User approval/recognition -> mtn_02
+    for (var i = 0; i < USER_AGREE_KEYWORDS.length; i++) {
+      if (userMsg.indexOf(USER_AGREE_KEYWORDS[i]) !== -1) {
+        motionTriggeredRef.current = true;
+        console.log('[Motion] TRIGGER mtn_02 | keyword:', USER_AGREE_KEYWORDS[i], '| user:', userMsg.slice(-40));
+        live2dRef?.current?.playMotion('mtn_02', 1);
+        return;
       }
     }
   };
@@ -63,21 +66,40 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     }, 1500);
   }, [live2dRef]);
 
-  const playAudio = useCallback((b64: string) => {
+  /**
+   * Play TTS audio. When viseme data is available, lip-sync starts exactly when
+   * audio playback begins (via onPlayStarted callback), eliminating the timing gap
+   * between async audio decode and the LipSyncDriver's independent timer.
+   */
+  const playAudio = useCallback((
+    b64: string,
+    visemes?: VisemeFrame[],
+    durationMs?: number,
+  ) => {
     if (!audioRef.current) audioRef.current = new AudioManager();
     audioRef.current.stop();
-    audioRef.current.playBase64(b64, scheduleEmotionReset).catch(function(e: Error) {
+
+    // Capture performance.now() at the exact moment AudioContext starts playback.
+    // This bridges the Web Audio timeline and the render loop's rAF timer,
+    // ensuring viseme frames are evaluated against real audio progress.
+    const onPlayStarted = visemes && visemes.length > 0
+      ? function(_ctxTime: number) {
+          const startTime = performance.now();
+          live2dRef?.current?.startLipSync(visemes, durationMs ?? 0, startTime);
+        }
+      : undefined;
+
+    audioRef.current.playBase64(b64, scheduleEmotionReset, onPlayStarted).catch(function(e: Error) {
       console.error("Audio:", e);
     });
-  }, [scheduleEmotionReset]);
+  }, [scheduleEmotionReset, live2dRef]);
 
   const flushPending = useCallback(() => {
     const p = pendingRef.current;
     if (p.base64 && p.visemes) {
       const b64 = p.base64, v = p.visemes, d = p.durationMs ?? 0;
       pendingRef.current = {};
-      playAudio(b64);
-      updateRef.current?.({ visemes: v, audioDurationMs: d });
+      playAudio(b64, v, d);
     }
   }, [playAudio]);
 
@@ -89,12 +111,12 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
 
   const handleEmotion = useCallback((emotion: string, intensity: number) => {
     emotionRef.current = emotion;  // capture for motion detection
+    console.log('[Motion] emotion detected:', emotion, 'intensity:', intensity);
     onLive2DUpdate?.({ emotion, intensity });
   }, [onLive2DUpdate]);
 
-  const handleToken = useCallback((token: string) => {
-    replyBufferRef.current += token;
-    detectMotion(replyBufferRef.current);
+  const handleToken = useCallback((_token: string) => {
+    detectMotion();  // checks userMessageRef, fires once per reply
   }, []);
 
   const handleViseme = useCallback((visemes: VisemeFrame[]) => {
@@ -131,8 +153,8 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     pendingRef.current = {};
     audioRef.current?.stop();
     if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
-    // Reset motion state for new reply
-    replyBufferRef.current = '';
+    // Store user message for motion detection, then reset motion state
+    userMessageRef.current = input.trim();
     emotionRef.current = '';
     motionTriggeredRef.current = false;
     live2dRef?.current?.stopAllMotions();
@@ -149,7 +171,7 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
       pendingRef.current = {};
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
-      replyBufferRef.current = '';
+      userMessageRef.current = text.trim();
       emotionRef.current = '';
       motionTriggeredRef.current = false;
       live2dRef?.current?.stopAllMotions();
@@ -173,7 +195,7 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     (text: string) => {
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
-      replyBufferRef.current = '';
+      userMessageRef.current = text.trim();
       emotionRef.current = '';
       motionTriggeredRef.current = false;
       live2dRef?.current?.stopAllMotions();

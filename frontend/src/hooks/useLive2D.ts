@@ -8,6 +8,7 @@ import { CubismManager, Live2DState } from '../live2d/CubismManager';
 export function useLive2D(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   modelPath: string,
+  retryKey?: number,
 ) {
   var ref = useRef<CubismManager | null>(null);
   var ref2 = useRef(modelPath);
@@ -25,7 +26,7 @@ export function useLive2D(
       if (!cancelled) setState({ loaded: false, error: err.message });
     });
     return function() { cancelled = true; mgr.dispose(); ref.current = null; };
-  }, [canvasRef]);
+  }, [canvasRef, retryKey]);
 
   return { state, manager: ref.current };
 }

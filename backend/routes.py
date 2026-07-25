@@ -69,26 +69,15 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_RE.sub("", text).strip()
 
 
-# Parenthetical action descriptions like (笑), (憋笑中), （叹气）etc.
-# LLMs occasionally emit these despite prompt instructions — strip them.
-_ACTION_KEYWORDS = '|'.join([
-    '笑', '哭', '气', '惊', '叹', '怒', '愁', '忧', '虑',
-    '思', '想', '惑', '默', '羞', '愧', '尬', '急',
-    '慌', '怕', '厌', '烦', '恨', '爱', '喜', '乐', '哀',
-    '憋', '捂', '扶', '摇', '点', '偷', '苦', '微', '大',
-    '哈', '嘻', '嘿', '呵', '呜', '啊', '哦', '嗯', '咦',
-    '认真', '严肃', '无奈', '担心', '骄傲', '得意', '感动',
-    '欣慰', '尴尬', '害羞', '脸红', '沉默', '摇头', '点头',
-    '疑惑', '困惑', '不解', '无语', '生气', '惊讶', '吃惊',
-    '思考', '叹气', '叹息', '感慨', '哭泣', '偷笑', '苦笑',
-    '微笑', '大笑', '憋笑', '哈哈', '嘻嘻', '嘿嘿', '扶额',
-    '捂脸',
-])
-_ACTION_TAG_RE = re.compile(r'[（(](?:' + _ACTION_KEYWORDS + r')[^）)]{0,4}[）)]')
+# Parenthetical action descriptions like (笑), (憋笑中), （叹气）, （内心欢呼）etc.
+# LLMs occasionally emit these as emotional asides or stage directions.
+# Previous approach used a keyword list but LLMs invent new phrases outside the list.
+# Now: remove ALL content inside Chinese/English parentheses — broad and reliable.
+_ACTION_TAG_RE = re.compile(r'[（(][^）)]*[）)]')
 
 
 def _strip_action_tags(text: str) -> str:
-    """Remove parenthetical action/emotion descriptions like (憋笑中) or （叹气）."""
+    """Remove ALL parenthetical content (Chinese or English brackets)."""
     return _ACTION_TAG_RE.sub('', text).strip()
 
 
@@ -212,8 +201,27 @@ async def chat(req: ChatRequest):
                     yield f"data: {json.dumps({'base64': audio_b64, 'format': 'mp3', 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
                     yield "\n"
 
-                    # Generate viseme sequence, scale to real audio duration
-                    viseme_seq = text_to_viseme_sequence(tts_text)
+                    # Build per-character durations from WordBoundary data.
+                    # Edge TTS returns word-level boundaries; distribute each word's
+                    # duration evenly across its characters for per-character viseme timing.
+                    char_durations: list[float] | None = None
+                    if word_boundaries:
+                        char_durations = []
+                        for wb in word_boundaries:
+                            wb_text = wb.get("text", "")
+                            wb_duration_ms = wb["duration"] / 10000.0  # 100ns → ms
+                            char_count = len(wb_text)
+                            if char_count > 0:
+                                dur_per_char = wb_duration_ms / char_count
+                                for _ in range(char_count):
+                                    char_durations.append(dur_per_char)
+
+                    # Generate viseme sequence with WordBoundary-based per-character timing
+                    viseme_seq = text_to_viseme_sequence(
+                        tts_text,
+                        ms_per_char=30.0,
+                        char_durations=char_durations,
+                    )
                     if viseme_seq and audio_duration_ms > 0:
                         raw_last_ms = viseme_seq[-1]["time_ms"]
                         if raw_last_ms > 0:

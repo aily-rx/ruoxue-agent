@@ -189,11 +189,15 @@ def phoneme_to_viseme_frames(initial: str, final: str) -> list[dict[str, float]]
 def text_to_viseme_sequence(
     text: str,
     ms_per_char: float = 30.0,
+    char_durations: list[float] | None = None,
 ) -> list[dict]:
     """Convert Chinese text to a 5-parameter viseme timeline with multi-frame phonemes.
 
     Each Chinese character produces 1-3 frames at ~30ms spacing for compound finals,
     capturing the internal mouth movement of diphthongs and triphthongs.
+
+    When char_durations is provided, each CJK character uses its actual duration
+    from WordBoundary data instead of the uniform ms_per_char.
 
     Returns:
         List of {"time_ms": float, "A": float, "I": float, "U": float, "E": float, "O": float}
@@ -201,18 +205,23 @@ def text_to_viseme_sequence(
     phonemes = text_to_phonemes(text)
     sequence: list[dict] = []
     time_ms = 0.0
+    cjk_idx = 0  # index into char_durations for CJK characters only
 
     for ph in phonemes:
         if ph["is_cjk"]:
             frames = phoneme_to_viseme_frames(ph["initial"], ph["final"])
+            # Use per-character duration from WordBoundary data if available
+            char_dur = char_durations[cjk_idx] if char_durations and cjk_idx < len(char_durations) else ms_per_char
+            cjk_idx += 1
         else:
-            # Punctuation → close mouth briefly
+            # Punctuation → close mouth briefly, short fixed duration
             frames = [_s()]
+            char_dur = 80.0  # 80ms pause for punctuation
 
         for shape in frames:
             frame: dict = {"time_ms": round(time_ms, 1)}
             frame.update(shape)
             sequence.append(frame)
-            time_ms += ms_per_char / max(len(frames), 1)
+            time_ms += char_dur / max(len(frames), 1)
 
     return sequence

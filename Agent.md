@@ -84,6 +84,17 @@ project/
 | 2 | [`live2d-white-rectangle-fix`](docs/frontend/experience/live2d-white-rectangle-fix.md) | Live2D model shows white rectangles over body/hair/clothing | Premultiplied alpha mismatch: WebGL context `premultipliedAlpha:false`, renderer `isPremultipliedAlpha=false`, texture not premultiplied | Set context `premultipliedAlpha:true`, call `setIsPremultipliedAlpha(true)`, use `UNPACK_PREMULTIPLY_ALPHA_WEBGL` during texture upload | 2026-07-24 |
 | 3 | [`live2d-ghosting-fix`](docs/frontend/experience/live2d-ghosting-fix.md) | Live2D model appears doubled (ghosting), like two copies overlapping | Missing Physics + Pose data loading and `CubismUpdateScheduler` pipeline; model parameters at incorrect defaults causing mask offset | Load physics3.json + pose3.json, create Physics/Pose updaters, register in CubismUpdateScheduler, call `onLateUpdate()` before `_model.update()` | 2026-07-24 |
 | 4 | [`live2d-emotion-driver-fix`](docs/frontend/experience/live2d-emotion-driver-fix.md) | Emotion expressions not visible, thinking expression doesn't show, reset button broken | 5 root causes: (1) parameter names don't match model, (2) expression index mapping guessed wrong, (3) two-phase transition drove unrelated params to 0, (4) reset set params to 0 instead of model defaults, (5) ref-based setEmotion bypassed React state | Read .exp3.json to get actual params & remap emotion→index, only drive emotion-specific params in transition, use `loadParameters()` for reset, remove auto-reset effect, add two-phase transition (neutral→target) | 2026-07-24 |
+| 5 | [`live2d-emotion-transition-v2`](docs/frontend/experience/live2d-emotion-transition-v2.md) | Neutral transition half-closes eyes; emotion switching looks jarring; Phase 2 targets silently cleared | (1) intensity scaled neutral causing eye=0.3, (2) neutral used two-phase path needlessly, (3) instant expression preset clashed with smooth param lerp, (4) same-frame race between Phase 2 trigger and cleanup check | Neutral: single-phase, skip intensity; defer expression preset to transition end; reorder cleanup check before Phase 2 trigger | 2026-07-24 |
+
+---
+
+## ✅ Phase Completion Summaries
+
+| Phase | Summary | Status | Date |
+|-------|---------|--------|------|
+| Phase 3 | [`phase3-summary.md`](docs/phase3-summary.md) — Live2D digital human: deliverables, architecture decisions, bug fix history, remaining issues, Phase 4 handoff | ✅ Done | 2026-07-25 |
+| Phase 2 | [`phase2-summary.md`](docs/phase2-summary.md) — Voice interaction: ASR/TTS/G2P/Viseme pipeline, recording/playback, audio-viseme sync | ✅ Done | 2026-07-25 |
+| Phase 1 | [`phase1-summary.md`](docs/phase1-summary.md) — Text chat: SSE streaming, emotion tags, conversation memory, chat UI, state management | ✅ Done | 2026-07-25 |
 
 ---
 

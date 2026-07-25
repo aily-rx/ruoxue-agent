@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-**Ruoxue** — 基于 React + Live2D + LangChain + FastAPI 构建的本地多模态 AI Agent 数字人助手。
+**Ruoxue** — 基于 React + Live2D Cubism SDK 5 + LangChain + FastAPI 构建的本地多模态 AI Agent 数字人助手。
 
-- **当前阶段**：Phase 1（文字聊天）已完成。Phase 2（语音）已搭建 `backend/tts/` 和 `backend/asr/` 目录脚手架，在当前分支 `feature/tts+ars` 上进行实现。Phase 3（Live2D 数字人）、Phase 4（Agent 工具/LangGraph）待开发。
-- **前端**：React 18 + TypeScript（strict 模式）+ Vite 6，端口 5173，通过 Vite proxy 将 `/api` 转发到 localhost:8000。
+- **当前阶段**：Phase 1（文字聊天）、Phase 2（语音交互）、Phase 3（Live2D 数字人/motion 语境绑定）均已完成。Phase 4（Agent 工具/LangGraph/Chroma）待开发。
+- **前端**：React 18 + TypeScript（strict 模式）+ Vite 6，端口 5173，通过 Vite proxy 将 /api 转发到 localhost:8000。
 - **后端**：Python FastAPI + LangChain + langchain-openai，调用 DeepSeek API，端口 8000。
-- **设计令牌**：紫色主色 `#7c5cbf`，定义在 `frontend/src/style.css` 的 `:root` 中，禁止硬编码颜色/间距。关键变量：`--primary` / `--primary-hover` / `--primary-light`、`--surface` / `--surface-alt` / `--bg`、`--text` / `--text-secondary` / `--text-muted`、`--border`、`--radius` / `--radius-sm`、`--shadow`、`--header-h: 56px`、`--bubble-max-w: 70%`。
+- **设计令牌**：紫色主色 #7c5cbf，定义在 frontend/src/style.css 的 :root 中，禁止硬编码颜色/间距。关键变量：--primary / --primary-hover / --primary-light、--surface / --surface-alt / --bg、--text / --text-secondary / --text-muted、--border、--radius / --radius-sm、--shadow、--header-h: 56px、--bubble-max-w: 70%。
 
 ## 常用命令
 
@@ -37,7 +37,7 @@ cd ..
 python -m backend.main            # 启动 FastAPI 服务 → http://localhost:8000
 ```
 
-> **注意**：`backend/agent/`、`backend/tts/`、`backend/asr/` 均包含空的 `__init__.py`，使其成为 Python 包以支持 `from backend.agent.memory import memory` 等绝对导入路径。
+> **注意**：`backend/agent/`、`backend/tts/`、`backend/asr/` 均包含 `__init__.py`，使其成为 Python 包以支持 `from backend.agent.memory import memory` 等绝对导入路径。
 
 ### 后端自测
 
@@ -47,7 +47,7 @@ curl -N -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"text":"你好"}'
 
-# 健康检查
+# 健康检查（含 LLM/ASR 状态）
 curl http://localhost:8000/api/health
 
 # Swagger 文档
@@ -57,19 +57,17 @@ open http://localhost:8000/docs
 ## 协作规范
 
 修改代码前必须遵循三步流程：
-
-1. **分析** — 理解问题，定位涉及的文件和影响范围
-2. **给方案** — 提供 2-3 个可选方案（含优劣对比），或先提问确认需求细节
-3. **等确认** — 用户明确说"改"或选择方案后再动手
-
-例外（可直接执行）：语法错误修复、格式化、文档补充、`git commit` / `git status` 等查询操作。
+1. 分析 — 理解问题，定位涉及的文件和影响范围
+2. 给方案 — 提供 2-3 个可选方案（含优劣对比），或先提问确认需求细节
+3. 等确认 — 用户明确说"改"或选择方案后再动手
+例外（可直接执行）：语法错误修复、格式化、文档补充、git commit / git status 等查询操作。
 
 ## 架构
 
 ### 全栈分层（从上到下依赖）
 
 ```
-Presentation     React App (ChatPanel, Live2D Canvas, VoiceButton)
+Presentation     React App (ChatPanel, Live2DCanvas, VoiceButton)
     ↑
 Transport        ChatClient (SSE), ASRClient, AudioManager, MicRecorder
     ↑
@@ -84,62 +82,89 @@ Provider         DeepSeek API, Edge TTS, SenseVoice ASR, pypinyin G2P
 
 ```
 backend/
-├── main.py              FastAPI 入口 + CORS + lifespan
-├── routes.py            API 路由：POST /api/chat (SSE), GET /api/health
+├── main.py              FastAPI 入口 + CORS + lifespan（启动时预加载 ASR 模型）
+├── routes.py            API 路由：POST /api/chat (SSE: token/emotion/audio/viseme/done),
+│                        POST /api/asr (WAV 上传), GET /api/health
 ├── config.py            环境变量配置（LLM、会话、TTS、ASR 参数）
 ├── agent/
 │   ├── emotional_agent.py   LangChain agent：LLM 流式生成 + [EMOTION:] 标签解析
 │   └── memory.py            会话记忆（dict 滑动窗口，Phase 4 计划升级到 Chroma）
-├── tts/                 TTS/G2P 模块（Phase 2 实现，当前为空壳 __init__.py）
-└── asr/                 ASR 模块（Phase 2 实现，当前为空壳 __init__.py）
+├── tts/
+│   ├── tts_service.py       Edge TTS 合成（基础 + WordBoundary 模式）
+│   ├── g2p_service.py       中文 G2P（pypinyin：汉字→声母/韵母）
+│   └── viseme_mapper.py     韵母→5 参数口型序列（支持复合韵母多帧）
+└── asr/
+    └── asr_service.py       SenseVoice ONNX 离线语音识别（含情绪检测）
 ```
 
 ### 前端模块结构
 
 ```
 frontend/src/
-├── main.tsx               React 入口
-├── App.tsx                根组件（Phase 1 仅包含 ChatPanel）
-├── style.css              CSS 设计令牌 + 全站样式
+├── main.tsx                   React 入口
+├── App.tsx                    根组件：左右分栏（ChatPanel + Live2DCanvas）
+├── style.css                  CSS 设计令牌 + 全站样式 + 响应式
 ├── components/
-│   ├── ChatPanel.tsx      聊天面板：消息列表 + 快捷回复 + 输入栏
-│   └── ChatBubble.tsx     单条消息气泡（用户/AI，情绪表情 emoji）
+│   ├── ChatPanel.tsx          聊天面板：消息列表 + 快捷回复 + 输入栏 + 语音按钮
+│   ├── ChatBubble.tsx         单条消息气泡（用户/AI，情绪表情 emoji）
+│   ├── Live2DCanvas.tsx       Live2D WebGL canvas 封装 + ref API 暴露
+│   └── VoiceButton.tsx        按住说话按钮（录音状态动画）
 ├── chat/
-│   └── ChatClient.ts      SSE 客户端：fetch + ReadableStream 解析 event stream
-└── hooks/
-    └── useChat.ts         chat 状态管理 Hook（消息列表、send/abort/clear）
+│   ├── ChatClient.ts          SSE 客户端（fetch + ReadableStream）
+│   └── ASRClient.ts           ASR HTTP 客户端（WAV 上传）
+├── hooks/
+│   ├── useChat.ts             chat 状态管理（消息列表、send/abort/clear、SSE 回调）
+│   ├── useLive2D.ts           Live2D 模型生命周期（创建/销毁 CubismManager）
+│   └── useVoice.ts            录音 + ASR 状态管理（按压、识别、错误）
+├── audio/
+│   ├── AudioManager.ts        MP3 base64 播放（带 onended 回调）
+│   └── MicRecorder.ts         Web Audio API 麦克风录制（16kHz PCM WAV）
+└── live2d/
+    ├── index.ts               统一导出
+    ├── CubismManager.ts       Live2D 模型生命周期编排器（加载/渲染/销毁）
+    ├── EmotionDriver.ts       情绪→Live2D 表情映射 + 两阶段渐变过渡
+    ├── LipSyncDriver.ts       Viseme 时间线→5 参数口型驱动（EMA 平滑）
+    ├── IdleMotionDriver.ts    随机小幅自然微动（随机游走 + lerp）
+    └── sdk/                   Live2D Cubism SDK for Web 5（TypeScript 封装）
 ```
 
-### 前端组件树（Phase 1）
+### 前端组件树（当前）
 
 ```
 App
-└── ChatPanel
-    ├── Header (logo + 连接状态)
-    ├── ChatBubble[]  (用户右对齐紫色，AI 左对齐灰色 + 情绪 emoji 头像)
-    ├── QuickReplies  (首次进入时显示 3 个快捷按钮)
-    └── InputBar      (textarea + 发送/停止按钮)
+├── ChatPanel
+│   ├── Header (logo + 连接状态)
+│   ├── ChatBubble[]  (用户右对齐紫色，AI 左对齐灰色 + 情绪 emoji 头像)
+│   ├── QuickReplies  (首次进入时显示 3 个快捷按钮)
+│   └── InputBar      (VoiceButton + textarea + 发送/停止按钮)
+└── Live2DCanvas
+    └── <canvas> WebGL 渲染 (通过 useLive2D hook 管理 CubismManager)
 ```
 
 ### 状态管理
 
-- `useChat` hook 管理全部聊天状态：`messages[]`、`isLoading`、`error`
-- 每个 message 对象：`{id, role, content, emotion?, intensity?, isStreaming?, timestamp}`
+- `useChat` hook 管理聊天状态：`messages[]`、`isLoading`、`error`、SSE 回调（onEmotion/onToken/onAudio/onViseme/onDone）
+- `useVoice` hook 管理语音状态：`isRecording`、`isRecognizing`、`audioLevel`、`voiceError`
+- `useLive2D` hook 管理模型状态：`Live2DState { loaded, error }`
+- App 通过 `useState<Live2DData>` 桥接 chat ↔ live2d（emotion/intensity/visemes 单向数据流 props）
+- Live2DCanvas 通过 `useImperativeHandle` 暴露同步 ref API（`setEmotion`/`resetEmotion`/`playMotion`/`stopAllMotions`/`startIdleMotion`），绕过 React 渲染周期延迟
 - `sessionId` 使用 `useRef` 持久化，同一页面保持同一会话
-- 后端 `session_id` 若前端不传则自动生成 12 位十六进制串（`uuid.uuid4().hex[:12]`）
 
 ## 核心数据流
 
-### SSE 对话流
+### SSE 对话流（当前完整协议）
 
 ```
 用户输入 → POST /api/chat (SSE)
   → emotional_agent.py:
     1. LLM 流式生成回复（含 [EMOTION: xxx|0.0] 前缀标签）
     2. 解析情绪标签 → SSE: event:emotion
-    3. 逐 token 推送 → SSE: event:token*
-    4. 完成 → SSE: event:done
+    3. 逐 token 推送 → SSE: event:token*（routes.py 做 emoji/动作标签/符号过滤）
+    4. LLM 完成后 → TTS 合成（WordBoundary 模式）→ SSE: event:audio
+    5. Viseme 序列生成 + 时长缩放 → SSE: event:viseme
+    6. 完成 → SSE: event:done
   → 前端 ChatClient 解析 event stream → useChat 更新 messages[]
+  → ChatPanel 回调链：onEmotion→App.setState, onAudio→AudioManager, onViseme→Live2DCanvas
 ```
 
 ### SSE 事件协议
@@ -147,10 +172,40 @@ App
 ```
 event: emotion    data: {"emotion":"happy","intensity":0.8}
 event: token      data: {"text":"你好！"}
-event: audio      data: {"base64":"...","format":"mp3","duration_ms":3200}   (Phase 2+)
-event: viseme     data: [{"time_ms":0,"level":3}...]                         (Phase 3+)
+event: audio      data: {"base64":"...","format":"mp3","duration_ms":3200}
+event: viseme     data: [{"time_ms":0,"A":0.95,"I":0,"U":0,"E":0,"O":0.25}, ...]
 event: done       data: {}
 event: error      data: {"message":"...","code":500}
+```
+
+### Live2D 渲染循环顺序（每帧）
+
+```
+1. _motionManager.updateMotion()     ← motion 驱动身体+头部 (基准层, 优先级 0/1)
+2. emotionDriver.update()             ← 面部表情覆盖 motion
+3. lipSyncDriver.update()             ← 口型覆盖 motion
+4. _updateScheduler.onLateUpdate()    ← 物理/姿态/眨眼
+5. _model.update()                    ← 最终化
+6. WebGL 绘制
+```
+
+> 此顺序确保 motion 不会覆盖表情和口型参数。
+
+### Motion 语境绑定流程
+
+```
+用户发送消息 → ChatPanel.handleSend():
+  1. 停止所有 motion → setEmotion('thoughtful') → 等待 LLM 回复
+  2. 每收到 token → detectMotion(): 累计文本 + 情绪匹配触发 motion
+  3. 收到 audio → AudioManager.playBase64()
+  4. 音频结束 → scheduleEmotionReset():
+     1.5s 后 → setEmotion('neutral') → startIdleMotion() (mtn_01 循环)
+
+Motion 触发规则:
+  - 待机：mtn_01 循环（优先级 0）
+  - emotion=happy + 认同关键词 → mtn_02（优先级 1）
+  - 魔法关键词 → special_01（优先级 1）
+  - 每轮回答只触发一次（motionTriggeredRef 防重复）
 ```
 
 ## 关键技术细节
@@ -159,13 +214,31 @@ event: error      data: {"message":"...","code":500}
 
 LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotional_agent.py` 使用正则 `EMOTION_TAG_RE` 从流式文本中提取，提取后移除标签，剩余文本作为 token 流推送。支持 8 种情绪：happy/sad/angry/surprised/neutral/thoughtful/worried/excited，intensity 0.0-1.0。若 LLM 未输出情绪标签，默认使用 `neutral/0.3`。
 
-### 前端情绪展示
+### EmotionDriver 两阶段过渡
 
-`ChatBubble.tsx` 将情绪映射为 emoji 图标显示在 AI 头像位置（如 happy→😊、sad→😢），目前仅做视觉展示，Phase 3 将驱动 Live2D 表情参数。
+非 neutral 情绪切换采用两阶段过渡，避免旧表情预设残留：
+1. **Phase 1**（200ms）：所有 22 个参数快照→neutral 全量值（眼形/眉角等 expression preset 效果归零）
+2. **Phase 2**（按情绪配置 transitionMs）：neutral→目标情绪的参数值
+3. Expression preset 延迟到 Phase 2 结束后才应用
+
+neutral 切换为单阶段直接 lerp。
+
+### TTS + Viseme 管线
+
+1. LLM 回复完成 → `routes.py` 做 emoji/动作标签/符号三重过滤得到 `tts_text`
+2. Edge TTS WordBoundary 模式合成 → 得到 MP3 + 词边界时间戳
+3. 从词边界计算真实音频时长 `audioDurationMs`
+4. `text_to_viseme_sequence()` → G2P（pypinyin 声韵母拆分）→ `viseme_mapper` 多帧映射 → 初始序列
+5. 用 `audioDurationMs / viseme_last_time_ms` 缩放系数校正整条序列时间轴
+6. 前端 `LipSyncDriver` 接收缩放后的序列，渲染时做帧间 lerp + EMA 平滑（SMOOTH=0.2）
+
+### Viseme 多帧机制
+
+`viseme_mapper.py` 对复合韵母生成 1-3 帧（简单单元音 1 帧，双元音/鼻韵母 2 帧），每帧 ~30ms 间距。驱动 5 个口型参数：`ParamA`（开口）、`ParamI`（展唇）、`ParamU`（圆唇）、`ParamE`（半开）、`ParamO`（圆开）。
 
 ### 会话记忆
 
-`ConversationMemory` 是全局单例，按 `session_id` 存储对话历史。使用滑动窗口（默认 `MAX_HISTORY_TURNS=20`，即 40 条消息）。消息格式兼容 LangChain 的 `MessagesPlaceholder`。Phase 4 计划升级为 Chroma 向量存储。
+`ConversationMemory` 是全局单例，按 `session_id` 存储对话历史。使用滑动窗口（默认 `MAX_HISTORY_TURNS=20`，即 40 条消息）。消息格式兼容 LangChain 的 `MessagesPlaceholder`。
 
 ### 配置管理
 
@@ -174,11 +247,35 @@ LLM 在回复文本开头嵌入 `[EMOTION: happy|0.5]` 格式的标签。`emotio
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `DEEPSEEK_API_KEY` | `your-api-key-here` | DeepSeek API 密钥 |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | 模型名称 |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名称 |
 | `LLM_TEMPERATURE` | `0.7` | 生成温度 |
 | `LLM_MAX_TOKENS` | `8192` | 最大 token 数 |
 | `MAX_HISTORY_TURNS` | `20` | 对话历史窗口大小 |
 | `RUOXUE_PORT` | `8000` | 后端端口 |
+| `TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | Edge TTS 语音 |
+| `TTS_PROXY` | 空 | HTTP 代理（用于 Edge TTS） |
+| `ASR_MODEL_DIR` | `model_assets/asr/sensevoice-small-int8` | SenseVoice 模型路径 |
+
+### ASR 服务
+
+SenseVoice Small int8 ONNX 模型（sherpa-onnx），在 FastAPI lifespan 启动时预加载。返回含情绪标签的识别结果（文本/语种/情绪）。前端通过按住说话→MicRecorder 录制 16kHz PCM WAV→POST /api/asr 上传。
+
+### CubismManager 模型加载流程
+
+```
+1. CubismFramework.startUp() + initialize()
+2. model3.json → CubismModelSettingJson
+3. moc3 → CubismUserModel.loadModel()
+4. Renderer → createRenderer() + startUp() + loadShaders()
+5. 纹理上传（UNPACK_PREMULTIPLY_ALPHA_WEBGL + RGBA）
+6. Physics + Pose → 注册 CubismUpdateScheduler
+7. EyeBlink → 自动眨眼（使用 model setting 参数）
+8. IdleMotionDriver.attach()
+9. Expressions (.exp3.json) → EmotionDriver.attach()
+10. Motions (.motion3.json) + setEffectIds + _isLoop
+11. LipSyncDriver.attach()
+12. startIdleMotion() (mtn_01 循环)
+```
 
 ## 已知陷阱
 
@@ -198,31 +295,53 @@ while (true) {
 }
 ```
 
-**教训**：SSE 解析器的状态变量（事件类型、buffer）必须跨 chunk 持久化。在 `while(true)` 循环内声明的任何变量都将在每次 `reader.read()` 调用时重新初始化。
+### Live2D 白色矩形
+
+**根因**：预乘 Alpha 不匹配。需要 Canvas context `premultipliedAlpha: true`，Renderer `setIsPremultipliedAlpha(true)`，纹理上传时 `UNPACK_PREMULTIPLY_ALPHA_WEBGL`。
+
+### Live2D 模型重影
+
+**根因**：缺少 Physics + Pose 数据加载和 `CubismUpdateScheduler` 管线。必须加载 physics3.json + pose3.json，创建 updater 并注册到 scheduler，在 `_model.update()` 前调用 `onLateUpdate()`。
+
+### Motion 多并存冲突
+
+**根因**：`startMotion()` 不清旧队列，多个 motion 同时驱动同一参数。`playMotion()` 内部必须先 `stopAllMotions()`。循环 motion 不触发 `onFinishedMotion` 回调，不能靠回调切换，需手动计时。
+
+### Emotion 过渡同帧竞态
+
+**根因**：两阶段过渡的 Phase 1 完成检查和 Phase 2 触发检查在同一帧内先后执行，Phase 2 先触发清空 `_phaseTwo`，Phase 1 结束逻辑立即清空 `_paramTarget`。修复：调整检查顺序，先检查 expression cleanup，再检查 Phase 2 触发。
+
+### Canvas resize 导致 WebGL 上下文丢失
+
+**根因**：设置 canvas.width/height 到相同值也会销毁 WebGL 上下文。`_resizeCanvas` 必须在赋值前做相等性检查：`if (this._canvas.width === w && this._canvas.height === h) return;`
 
 ## 阶段规划
 
 | 阶段 | 状态 | 内容 |
 |---|---|---|
 | Phase 1 | ✅ 完成 | 文字聊天：SSE 流式对话 + 情绪标签 + 会话记忆 |
-| Phase 2 | 🚧 开发中 | 语音交互：SenseVoice ASR + Edge TTS + 麦克风（`feature/tts+ars` 分支） |
-| Phase 3 | ⏳ 待开发 | Live2D 数字人：模型加载 + 情绪驱动 + 口型同步 |
+| Phase 2 | ✅ 完成 | 语音交互：SenseVoice ASR + Edge TTS + Viseme 收口 + 麦克风 |
+| Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
 | Phase 4 | ⏳ 待开发 | Agent 智能体：LangGraph + 工具调用 + Chroma 记忆 + RAG |
 
-> **当前状态**：Phase 1 完成后暂无正式测试框架（无 pytest / vitest）、无 lint 配置（无 ruff / ESLint）。开发中通过 curl 自测后端 + 浏览器 DevTools 验证前端。
+> 无正式测试框架（无 pytest / vitest）、无 lint 配置（无 ruff / ESLint）。开发中通过 curl 自测后端 + 浏览器 DevTools 验证前端。
 
 ## 开发顺序约定
 
 按依赖方向从下往上编码，保证每个模块写完就能独立测试：
 
-- **后端顺序**：`config → agent/emotional_agent → agent/memory → routes → main`
-- **前端顺序**：`App → ChatPanel → ChatBubble → ChatClient → useChat`
+- **后端顺序**：`config → agent/emotional_agent → agent/memory → tts/asr → routes → main`
+- **前端顺序**：`App → ChatPanel → ChatBubble → ChatClient → useChat → Live2D 层`
 
 每个 Phase 启动前必须先完成：PRD 文档 → API 接口定义 → 原型/布局 → 依赖清单 → 前后端数据协议对齐。详见 `docs/development-workflow.md`。
 
 ## AstrBot 目录
 
-`AstrBot/` 是一个独立的开源项目（v4.26.7，AGPL-3.0），作为多平台 LLM 聊天机器人框架的参考模板。**它不是 Ruoxue 源码的一部分**，不作为 Ruoxue 构建内容，也不应被修改。它有自己的 `AGENTS.md` 和独立的开发工作流。
+`AstrBot/` 是一个独立的开源项目（v4.26.7，AGPL-3.0），作为多平台 LLM 聊天机器人框架的参考模板。**它不是 Ruoxue 源码的一部分**，不应被修改。
+
+## CubismSdkForWeb-5-r.5 目录
+
+Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/sdk/` 为其复制/适配版本。原始 SDK 目录仅供参考，实际开发修改在 `frontend/src/live2d/sdk/` 中进行。
 
 ## 文档索引
 
@@ -235,10 +354,14 @@ while (true) {
 | `docs/backend/api.md` | API 文档（SSE 事件格式、请求/响应 schema） |
 | `docs/backend/architecture.md` | 后端架构（路由层、Agent 层、TTS 管线、ASR 模块） |
 | `docs/backend/prd-agent.md` | Agent 智能体 PRD（LangGraph、工具、记忆、RAG） |
-| `docs/backend/prd-lipsync.md` | 2D 口型同步 PRD（pypinyin G2P、5 级嘴型） |
-| `docs/backend/prd-voice.md` | 语音交互 PRD（SenseVoice ASR、Edge TTS、WebSocket） |
+| `docs/backend/prd-lipsync.md` | 口型同步 PRD（pypinyin G2P、5 级嘴型、多帧机制） |
+| `docs/backend/prd-voice.md` | 语音交互 PRD（SenseVoice ASR、Edge TTS） |
 | `docs/frontend/prd-live2d.md` | Live2D 集成方案（SDK、组件架构、React 封装） |
 | `docs/frontend/prd-emotion-expression.md` | 情绪表情 PRD（8 种情绪、Live2D 参数映射） |
-| `docs/frontend/prototype-phase1-chat.md` | Phase 1 聊天界面 ASCII 原型（组件树、PC/移动端、全部状态） |
-| `docs/frontend/dependencies.md` | 各 Phase 依赖清单（前端 npm + 后端 pip） |
+| `docs/frontend/prd-motion-context.md` | Motion 语境绑定 PRD（待机/关键词触发/恢复、优先级体系） |
+| `docs/frontend/prototype-phase1-chat.md` | Phase 1 聊天界面 ASCII 原型 |
+| `docs/frontend/dependencies.md` | 各 Phase 依赖清单 |
+| `docs/phase3-summary.md` | Phase 3 完成总结（交付清单、架构决策、Bug 记录、遗留问题） |
+| `docs/phase2-summary.md` | Phase 2 完成总结（ASR/TTS/G2P/Viseme 管线、录放音、音画同步） |
+| `docs/phase1-summary.md` | Phase 1 完成总结（SSE 流式、情绪标签、会话记忆、聊天 UI） |
 | `Agent.md` | 共享知识库索引（经验文档触发机制、命名规范、架构规则） |
