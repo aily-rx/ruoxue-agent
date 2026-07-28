@@ -73,7 +73,9 @@ Thumbs.db
 *.bak
 *.cache
 
-# Reference / external projects
-AstrBot/
-CubismSdkForWeb-5-r.5/
-Live2D_*.md
+# Reference / external projects (already removed from disk)
+
+# Phase 4 local data
+chroma_data/
+faiss_data/
+backend/uploads/

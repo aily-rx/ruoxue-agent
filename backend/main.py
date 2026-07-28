@@ -5,7 +5,14 @@ FastAPI application serving the AI Agent API.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
+
+# Allow running from any directory (e.g. python main.py inside backend/)
+_proj_root = Path(__file__).resolve().parent.parent
+if str(_proj_root) not in sys.path:
+    sys.path.insert(0, str(_proj_root))
 
 import uvicorn
 from fastapi import FastAPI

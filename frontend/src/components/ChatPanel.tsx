@@ -138,6 +138,8 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages } =
     useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onToken: handleToken, onViseme: handleViseme, onDone: handleDone });
   const [input, setInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -204,6 +206,37 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     },
     [sendMessage, live2dRef],
   );
+
+  // File upload
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const resp = await fetch("/api/upload", { method: "POST", body: form });
+      if (!resp.ok) throw new Error((await resp.json()).detail ?? "Upload failed");
+      const data = await resp.json();
+      // Auto-send message asking agent to read the uploaded file
+      const msg = `请帮我查看这个文件：${data.path}`;
+      pendingRef.current = {};
+      audioRef.current?.stop();
+      if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
+      userMessageRef.current = msg;
+      emotionRef.current = '';
+      motionTriggeredRef.current = false;
+      live2dRef?.current?.stopAllMotions();
+      live2dRef?.current?.setEmotion('thoughtful', 0.5);
+      sendMessage(msg);
+    } catch (err: any) {
+      console.error("Upload failed:", err);
+    } finally {
+      setUploading(false);
+      // Reset file input so same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [sendMessage, live2dRef]);
 
   // Auto-resize textarea
   const handleInputChange = useCallback(
@@ -272,6 +305,21 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
           onRecognized={handleVoiceRecognized}
           disabled={isLoading}
         />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt,.md,.pdf,.py,.ts,.tsx,.json,.yaml,.yml,.html,.css"
+          onChange={handleFileSelect}
+          style={{ display: "none" }}
+        />
+        <button
+          className={`upload-btn ${uploading ? "uploading" : ""}`}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading || uploading}
+          title="上传文件"
+        >
+          {uploading ? "⏳" : "📎"}
+        </button>
         <textarea
           ref={inputRef}
           className="chat-input"

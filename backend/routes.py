@@ -13,8 +13,9 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.agent.emotional_agent import generate_reply
+from backend.agent.agent_graph import run_agent_stream
 from backend.agent.memory import memory
+from backend.agent.chroma_memory import chroma_memory
 from backend.config import TTS_PROXY
 from backend.tts.tts_service import synthesize_with_word_boundary
 from backend.tts.viseme_mapper import text_to_viseme_sequence
@@ -143,7 +144,7 @@ async def chat(req: ChatRequest):
         full_reply = ""
         has_error = False
         try:
-            async for sse_event in generate_reply(req.text, history):
+            async for sse_event in run_agent_stream(req.text, history):
                 event = sse_event.event
                 data = sse_event.data
 
@@ -236,10 +237,15 @@ async def chat(req: ChatRequest):
                     # TTS failure is non-fatal; conversation continues
                     print(f"[TTS] synthesis failed: {tts_err}")
 
-            # Save to memory after successful generation
+            # Save to short-term memory
             memory.add_user_message(req.session_id, req.text)
             if full_reply.strip():
                 memory.add_assistant_message(req.session_id, full_reply)
+                # Also store in Chroma long-term memory (fire-and-forget)
+                try:
+                    chroma_memory.store_turn(req.session_id, req.text, full_reply)
+                except Exception as e:
+                    print(f"[Chroma] store_turn error: {e}")
 
             yield f"event: done\n"
             yield f"data: {{}}\n"
@@ -282,6 +288,49 @@ async def asr_recognize(file: UploadFile = File(...)):
         return result
     except Exception as exc:
         raise HTTPException(500, f"ASR failed: {exc}")
+
+
+@router.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """File upload endpoint — saves to uploads/ and returns path for read_file tool.
+
+    Max 20 MB. Supported: text, PDF, documents.
+    """
+    MAX_SIZE = 20 * 1024 * 1024  # 20 MB
+
+    # Sanitize: extract only the base filename (prevents path traversal)
+    filename = file.filename or "unknown"
+    safe_name = Path(filename).name  # strips directory components
+    safe_name = "".join(c for c in safe_name if c.isalnum() or c in "._- ()")
+    if not safe_name.strip():
+        raise HTTPException(400, "Invalid filename")
+
+    # Ensure uploads directory exists
+    import os
+    from pathlib import Path
+    upload_dir = Path(__file__).resolve().parent / "uploads"
+    upload_dir.mkdir(exist_ok=True)
+
+    # Read file, checking size
+    contents = await file.read()
+    if len(contents) > MAX_SIZE:
+        raise HTTPException(400, f"File too large (max {MAX_SIZE // 1024 // 1024} MB)")
+
+    # Write to disk
+    filepath = upload_dir / safe_name
+    counter = 1
+    stem, ext = os.path.splitext(safe_name)
+    while filepath.exists():
+        filepath = upload_dir / f"{stem}_{counter}{ext}"
+        counter += 1
+
+    filepath.write_bytes(contents)
+
+    return {
+        "path": str(filepath),
+        "filename": filepath.name,
+        "size": len(contents),
+    }
 
 
 @router.get("/api/health", response_model=HealthResponse)

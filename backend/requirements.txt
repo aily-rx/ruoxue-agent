@@ -10,3 +10,7 @@ python-dotenv>=1.0
 edge-tts>=6.1
 sherpa-onnx>=1.10
 pypinyin>=0.50
+duckduckgo-search>=6.0
+chromadb>=0.5
+faiss-cpu>=1.8
+pypdf>=5.0

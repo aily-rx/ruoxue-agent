@@ -1,7 +1,10 @@
-"""LangChain agent with emotion-aware responses.
+"""Phase 1-3 legacy agent — now only provides shared constants.
 
-Generates streaming replies with embedded emotion tags for driving
-Live2D facial expressions (Phase 3).
+``generate_reply()`` has been superseded by ``agent_graph.run_agent_stream()``.
+This module remains as the canonical source for:
+    EMOTION_SYSTEM_PROMPT  — the core persona + emotion instruction
+    EMOTION_TAG_RE         — regex for [EMOTION: xxx|0.0] extraction
+    SSEEvent               — dataclass for SSE event serialization
 """
 
 from __future__ import annotations

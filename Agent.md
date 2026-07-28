@@ -171,4 +171,4 @@ docs/
 
 ---
 
-*Last updated: 2026-07-21 — This file is automatically maintained. Do not edit manually unless adding project-wide rules.*
+*Last updated: 2026-07-28 — Phase 4 Agent complete (LangGraph + Tools + Chroma + FAISS RAG).*

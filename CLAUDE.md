@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Ruoxue** — 基于 React + Live2D Cubism SDK 5 + LangChain + FastAPI 构建的本地多模态 AI Agent 数字人助手。
 
-- **当前阶段**：Phase 1（文字聊天）、Phase 2（语音交互）、Phase 3（Live2D 数字人/motion 语境绑定）均已完成。Phase 4（Agent 工具/LangGraph/Chroma）待开发。
+- **当前阶段**：Phase 1-3 已完成，Phase 4 LangGraph Agent + Tools + Chroma 记忆 + FAISS RAG 已实现。Human-in-the-loop 待做。
 - **前端**：React 18 + TypeScript（strict 模式）+ Vite 6，端口 5173，通过 Vite proxy 将 /api 转发到 localhost:8000。
 - **后端**：Python FastAPI + LangChain + langchain-openai，调用 DeepSeek API，端口 8000。
 - **设计令牌**：紫色主色 #7c5cbf，定义在 frontend/src/style.css 的 :root 中，禁止硬编码颜色/间距。关键变量：--primary / --primary-hover / --primary-light、--surface / --surface-alt / --bg、--text / --text-secondary / --text-muted、--border、--radius / --radius-sm、--shadow、--header-h: 56px、--bubble-max-w: 70%。
@@ -87,8 +87,12 @@ backend/
 │                        POST /api/asr (WAV 上传), GET /api/health
 ├── config.py            环境变量配置（LLM、会话、TTS、ASR 参数）
 ├── agent/
-│   ├── emotional_agent.py   LangChain agent：LLM 流式生成 + [EMOTION:] 标签解析
-│   └── memory.py            会话记忆（dict 滑动窗口，Phase 4 计划升级到 Chroma）
+│   ├── emotional_agent.py   [Legacy] 提供 EMOTION_SYSTEM_PROMPT 常量
+│   ├── agent_graph.py       Phase 4: LangGraph StateGraph + 三层 prompt
+│   ├── tools.py             Phase 4: 5 个工具 (search/read/weather/list/knowledge)
+│   ├── memory.py            短期记忆（dict 滑动窗口）
+│   ├── chroma_memory.py     Phase 4: Chroma 长期记忆（语义检索）
+│   └── rag_service.py       Phase 4: FAISS 知识库（文档索引 + 语义搜索）
 ├── tts/
 │   ├── tts_service.py       Edge TTS 合成（基础 + WordBoundary 模式）
 │   ├── g2p_service.py       中文 G2P（pypinyin：汉字→声母/韵母）
@@ -322,7 +326,7 @@ while (true) {
 | Phase 1 | ✅ 完成 | 文字聊天：SSE 流式对话 + 情绪标签 + 会话记忆 |
 | Phase 2 | ✅ 完成 | 语音交互：SenseVoice ASR + Edge TTS + Viseme 收口 + 麦克风 |
 | Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
-| Phase 4 | ⏳ 待开发 | Agent 智能体：LangGraph + 工具调用 + Chroma 记忆 + RAG |
+| Phase 4 | ✅ 完成 | Agent 智能体：LangGraph + 5 工具 + Chroma 记忆 + FAISS RAG |
 
 > 无正式测试框架（无 pytest / vitest）、无 lint 配置（无 ruff / ESLint）。开发中通过 curl 自测后端 + 浏览器 DevTools 验证前端。
 
@@ -330,7 +334,7 @@ while (true) {
 
 按依赖方向从下往上编码，保证每个模块写完就能独立测试：
 
-- **后端顺序**：`config → agent/emotional_agent → agent/memory → tts/asr → routes → main`
+- **后端顺序**：`config → agent/emotional_agent → agent/agent_graph → agent/tools → agent/memory → agent/chroma_memory → agent/rag_service → tts/asr → routes → main`
 - **前端顺序**：`App → ChatPanel → ChatBubble → ChatClient → useChat → Live2D 层`
 
 每个 Phase 启动前必须先完成：PRD 文档 → API 接口定义 → 原型/布局 → 依赖清单 → 前后端数据协议对齐。详见 `docs/development-workflow.md`。
