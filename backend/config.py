@@ -1,7 +1,7 @@
 """Ruoxue backend configuration.
 
 All settings are read from environment variables with sensible defaults.
-A backend/.env file is automatically loaded if present.
+Loads .env from project root first, then backend/.env (the latter overrides).
 """
 
 import os
@@ -9,6 +9,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Load root .env first, then backend/.env (overrides root)
+_proj_root = Path(__file__).resolve().parent.parent
+load_dotenv(_proj_root / ".env", override=False)
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
 
