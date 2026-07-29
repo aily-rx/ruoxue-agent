@@ -76,6 +76,7 @@ export class CubismManager extends CubismUserModel {
 
     // Use ResizeObserver to respond to CSS layout changes (flex, grid, etc.),
     // not just window resize. Fires synchronously on observe().
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     var self = this;
     this._resizeObserver = new ResizeObserver(function() {
       self._resizeCanvas();
@@ -314,6 +315,7 @@ export class CubismManager extends CubismUserModel {
 
   private _startLoop(): void {
     if (this._rafId) return;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     var self = this;
     var frame = function() {
       self._rafId = requestAnimationFrame(frame);
