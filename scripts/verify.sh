@@ -42,9 +42,14 @@ check "docker-backend"   docker build -q -f backend/Dockerfile backend/
 check "docker-frontend"  docker build -q -f frontend/Dockerfile frontend/
 
 # ---- 技能硬约束 ----
-check "defensive-output" bash scripts/check-defensive.sh
-check "prototype-first"  bash scripts/check-prototype.sh
-check "implement"        bash scripts/check-implement.sh
+check "defensive-output"    bash scripts/check-defensive.sh
+check "prototype-first"     bash scripts/check-prototype.sh
+check "implement"           bash scripts/check-implement.sh
+check "read-before-code"    bash scripts/check-read-before.sh
+check "tdd"                 bash scripts/check-tdd.sh
+check "grill-me"            bash scripts/check-grill.sh
+check "diagnose-bugs"       bash scripts/check-diagnose.sh
+check "codebase-design"     bash scripts/check-codebase-design.sh
 
 # ---- 结果 ----
 echo "============================="
