@@ -106,6 +106,17 @@ class SkillLoader:
                 return candidate.read_text(encoding="utf-8")
         return None
 
+    def core_rules(self) -> str:
+        """Return always-active behavioral rules for the AI.
+
+        These rules don't need keyword matching — they belong in every system
+        prompt. Callers should inject this text as a permanent prompt layer.
+        """
+        rules_path = self._skills_dir / "CORE_RULES.md"
+        if rules_path.exists():
+            return rules_path.read_text(encoding="utf-8")
+        return ""
+
     def list_skills(self) -> list[dict]:
         """Return metadata for all loaded skills, sorted by priority desc."""
         self._ensure_index()

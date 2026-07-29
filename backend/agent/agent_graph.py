@@ -170,8 +170,8 @@ async def run_agent_stream(
       Layer 3 — memory_context   (Chroma long-term memory)
       Layer 4 — skill_context    (keyword-matched from deepseek-skills/)
     """
-    # Layer 1: static persona (never changes)
-    system_prompt = EMOTION_SYSTEM_PROMPT
+    # Layer 1: static persona + core behavioral rules (from skill system)
+    system_prompt = EMOTION_SYSTEM_PROMPT + "\n\n" + _skill_loader.core_rules()
 
     # Layer 2: runtime context (dynamic per-request)
     now = datetime.now()
