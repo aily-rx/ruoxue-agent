@@ -34,7 +34,7 @@ jobs:
         run: mypy backend/ --ignore-missing-imports --explicit-package-bases
 
       - name: Pytest
-        run: pytest backend/tests/ -v --asyncio-mode=auto
+        run: python -m pytest backend/tests/ -v --asyncio-mode=auto
 
       # ============================================================
       # Node Frontend
