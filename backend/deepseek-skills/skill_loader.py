@@ -1,4 +1,4 @@
-﻿"""
+"""
 DeepSeek Skills — Universal Skill Loader
 
 Zero-dependency skill loader that matches user input to the most relevant
@@ -41,6 +41,7 @@ from pathlib import Path
 
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -110,13 +111,15 @@ class SkillLoader:
         self._ensure_index()
         result = []
         for name, meta in self._skills.items():
-            result.append({
-                "name": name,
-                "display_name": meta.get("display_name", name),
-                "type": meta.get("type", "model-invoked"),
-                "priority": meta.get("priority", 5),
-                "trigger_keywords": meta.get("trigger_keywords", []),
-            })
+            result.append(
+                {
+                    "name": name,
+                    "display_name": meta.get("display_name", name),
+                    "type": meta.get("type", "model-invoked"),
+                    "priority": meta.get("priority", 5),
+                    "trigger_keywords": meta.get("trigger_keywords", []),
+                }
+            )
         result.sort(key=lambda s: s["priority"], reverse=True)
         return result
 

@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     # Phase 2: preload ASR model at startup
     try:
         from backend.asr.asr_service import asr_service
+
         asr_service.load_model()
     except Exception as exc:
         print(f"[Ruoxue] WARNING: ASR model not loaded: {exc}")

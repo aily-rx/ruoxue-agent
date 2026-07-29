@@ -32,7 +32,7 @@ Phase 2: 目标 = 1.0 × 0.3 = 0.3 → 眼睛只开 30%
 ```
 **结果**: 数字人"半闭眼"状态，看起来没睡醒。
 
-**核心错误**: 
+**核心错误**:
 1. Phase 1 设为 `0` 但中性值不是 `0` (眼睛中性 = 1.0 全开)
 2. "50% 中性"无意义 — intensity 不应缩放 neutral
 
@@ -150,7 +150,7 @@ happy → sad:
   Phase 1 驱动: {ParamMouthDown, ParamMouthUp, ParamEyeLOpen, ParamEyeROpen}
   ❌ 未驱动: ParamEyeLSmile(1), ParamEyeRSmile(1) → 残留
   ❌ 未驱动: ParamCheek(0.5) → 残留
-  
+
   结果: sad 嘴巴 + happy 眼睛 = 诡异表情
 ```
 
@@ -202,7 +202,7 @@ Frame N (Phase 1 完成, t=1.0):
      t >= 1.0      → TRUE   (还是 Phase 1 的 t)
      !_phaseTwo    → TRUE   (刚在步骤 2 被清空！)
      _targetExpressionIndex !== null → TRUE
-     
+
      → _applyExpression → 立即清空 _paramTarget ← 删掉了步骤 2 刚写入的目标！
 
 Frame N+1:
@@ -233,4 +233,3 @@ Phase 2 的参数在整个第二阶段中正常 lerp，直到 Phase 2 的 `t >= 
 
 - **同一帧内状态变更+条件检查 = 竞态** — 清空标志后立即检查"是否已清空"是经典陷阱
 - **检查和状态变更的顺序决定语义** — 先检查"是否还有工作未完成"，再做清理
-

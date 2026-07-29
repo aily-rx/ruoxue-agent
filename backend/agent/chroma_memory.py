@@ -18,6 +18,7 @@ from chromadb.utils import embedding_functions
 # ChromaMemory — singleton service
 # ---------------------------------------------------------------------------
 
+
 class ChromaMemory:
     """Stores and retrieves conversation turns via Chroma vector DB.
 
@@ -51,12 +52,14 @@ class ChromaMemory:
         try:
             self._collection.add(
                 documents=[doc],
-                metadatas=[{
-                    "session_id": session_id,
-                    "user_text": user_text[:500],
-                    "assistant_text": assistant_text[:500],
-                    "stored_at": datetime.now(UTC).isoformat(),
-                }],
+                metadatas=[
+                    {
+                        "session_id": session_id,
+                        "user_text": user_text[:500],
+                        "assistant_text": assistant_text[:500],
+                        "stored_at": datetime.now(UTC).isoformat(),
+                    }
+                ],
                 ids=[turn_id],
             )
         except Exception as exc:

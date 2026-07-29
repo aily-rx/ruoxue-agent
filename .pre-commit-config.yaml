@@ -15,10 +15,14 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^frontend/public/|\.json$|\.moc3$
       - id: end-of-file-fixer
+        exclude: ^frontend/public/|\.json$|\.moc3$
       - id: check-yaml
       - id: check-json
+        exclude: ^frontend/public/
       - id: check-toml
+        exclude: ^backend/deepseek-skills/
       - id: check-added-large-files
         args: ['--maxkb=500']
 
@@ -30,4 +34,85 @@ repos:
         entry: bash -c 'cd frontend && npm run lint'
         language: system
         files: \.(ts|tsx|js|jsx)$
+        pass_filenames: false
+
+  # ---- 技能硬约束：开发时（pre-commit）----
+  - repo: local
+    hooks:
+      - id: skill-tdd
+        name: "skill: tdd 测试覆盖"
+        entry: bash scripts/check-tdd.sh
+        language: system
+        files: ^backend/(agent|tts|asr)/.*\.py$
+        pass_filenames: false
+
+      - id: skill-read-before
+        name: "skill: read-before-code 文件引用"
+        entry: bash scripts/check-read-before.sh
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+
+      - id: skill-prototype
+        name: "skill: prototype-first 组件文档"
+        entry: bash scripts/check-prototype.sh
+        language: system
+        files: ^frontend/src/components/.*\.tsx$
+        pass_filenames: false
+
+      - id: skill-codebase
+        name: "skill: codebase-design 公开接口"
+        entry: bash scripts/check-codebase-design.sh
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+
+      - id: skill-grill
+        name: "skill: grill-me spec 完整性"
+        entry: bash scripts/check-grill.sh
+        language: system
+        files: ^docs/.*prd.*\.md$|^docs/.*spec.*\.md$
+        pass_filenames: false
+
+      - id: skill-diagnose
+        name: "skill: diagnose-bugs 根因描述"
+        entry: bash scripts/check-diagnose.sh
+        language: system
+        stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
+
+  # ---- 技能硬约束：构建时（pre-push）----
+  - repo: local
+    hooks:
+      - id: skill-defensive
+        name: "skill: defensive-output TTS过滤"
+        entry: bash scripts/check-defensive.sh
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+
+      - id: skill-implement
+        name: "skill: implement 循环依赖"
+        entry: bash scripts/check-implement.sh
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+
+      - id: docker-backend
+        name: "Docker: backend build"
+        entry: docker build -q -f backend/Dockerfile backend/
+        language: system
+        stages: [pre-push]
+        always_run: true
+        pass_filenames: false
+
+      - id: docker-frontend
+        name: "Docker: frontend build"
+        entry: docker build -q -f frontend/Dockerfile frontend/
+        language: system
+        stages: [pre-push]
+        always_run: true
         pass_filenames: false

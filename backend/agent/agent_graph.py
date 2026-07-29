@@ -48,21 +48,18 @@ from typing_extensions import TypedDict
 # DeepSeek Skills — dynamic prompt injection
 # ---------------------------------------------------------------------------
 
-_deepseek_skills_path = str(
-    Path(__file__).resolve().parent.parent / "deepseek-skills"
-)
+_deepseek_skills_path = str(Path(__file__).resolve().parent.parent / "deepseek-skills")
 if _deepseek_skills_path not in sys.path:
     sys.path.insert(0, _deepseek_skills_path)
 
 from skill_loader import SkillLoader  # noqa: E402
 
-_skill_loader = SkillLoader(
-    str(Path(__file__).resolve().parent.parent / "deepseek-skills" / "skills")
-)
+_skill_loader = SkillLoader(str(Path(__file__).resolve().parent.parent / "deepseek-skills" / "skills"))
 
 # ---------------------------------------------------------------------------
 # LangGraph State
 # ---------------------------------------------------------------------------
+
 
 class AgentState(TypedDict):
     """State carried through the agent graph.
@@ -85,6 +82,7 @@ class AgentState(TypedDict):
 # LLM factory
 # ---------------------------------------------------------------------------
 
+
 def _build_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=DEEPSEEK_MODEL,
@@ -99,6 +97,7 @@ def _build_llm() -> ChatOpenAI:
 # ---------------------------------------------------------------------------
 # Graph nodes
 # ---------------------------------------------------------------------------
+
 
 async def agent_node(state: AgentState) -> dict:
     """Core reasoning node — combines three prompt layers, then invokes LLM.
@@ -158,6 +157,7 @@ agent_graph = _workflow.compile()
 # Public API — drop-in replacement for emotional_agent.generate_reply()
 # ---------------------------------------------------------------------------
 
+
 async def run_agent_stream(
     user_text: str,
     history: list[dict] | None = None,
@@ -176,14 +176,12 @@ async def run_agent_stream(
     # Layer 2: runtime context (dynamic per-request)
     now = datetime.now()
     weekday = ["一", "二", "三", "四", "五", "六", "日"][now.weekday()]
-    runtime_context = (
-        f"当前日期：{now.year}年{now.month}月{now.day}日，星期{weekday}。"
-    )
+    runtime_context = f"当前日期：{now.year}年{now.month}月{now.day}日，星期{weekday}。"
 
     # Layer 3: long-term memory (semantic retrieval from Chroma)
     memory_context = (
         "\n\n你拥有长期记忆。以下是与当前话题相关的历史对话，"
-        '请自然地引用它们（如果用户问起相关话题，可以说「之前我们聊过」）：\n\n'
+        "请自然地引用它们（如果用户问起相关话题，可以说「之前我们聊过」）：\n\n"
     )
     chroma_hits = chroma_memory.retrieve_context(user_text)
     if chroma_hits:
@@ -199,9 +197,7 @@ async def run_agent_stream(
         skill_content = _skill_loader.load(skill_name)
         if skill_content:
             skill_context = (
-                f"[技能指令 — {skill_name}]\n"
-                "以下是适用于当前任务的专项指令，请严格遵循：\n\n"
-                f"{skill_content}"
+                f"[技能指令 — {skill_name}]\n" "以下是适用于当前任务的专项指令，请严格遵循：\n\n" f"{skill_content}"
             )
             print(f"[Skill] matched '{skill_name}' for input: {user_text[:50]}...")
 
@@ -272,7 +268,7 @@ async def run_agent_stream(
                     event="emotion",
                     data={"emotion": emotion, "intensity": intensity},
                 )
-                full_text = full_text[match.end():]
+                full_text = full_text[match.end() :]
                 emotion_tag_sent = True
                 if full_text:
                     yield SSEEvent(event="token", data={"text": full_text})

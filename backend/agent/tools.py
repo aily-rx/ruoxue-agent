@@ -1,4 +1,4 @@
-﻿"""Agent tools for Phase 4.
+"""Agent tools for Phase 4.
 
 Five tools:
   - search_web     : Tavily AI search (结构化结果，国内可直接访问)
@@ -23,6 +23,7 @@ _tavily = TavilyClient(api_key=TAVILY_API_KEY)
 # ===========================================================================
 # search_web
 # ===========================================================================
+
 
 @langchain_tool
 def search_web(query: str) -> str:
@@ -67,6 +68,7 @@ def search_web(query: str) -> str:
 # read_file
 # ===========================================================================
 
+
 @langchain_tool
 def read_file(path: str) -> str:
     """Read the contents of a local file (text or PDF).
@@ -94,9 +96,7 @@ def read_file(path: str) -> str:
             from pypdf import PdfReader
 
             reader = PdfReader(str(filepath))
-            content = "\n".join(
-                page.extract_text() or "" for page in reader.pages
-            )
+            content = "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception as e:
             return f"Error reading PDF: {e}"
     else:
@@ -115,6 +115,7 @@ def read_file(path: str) -> str:
 # ===========================================================================
 # get_weather
 # ===========================================================================
+
 
 @langchain_tool
 def get_weather(city: str) -> str:
@@ -175,6 +176,7 @@ def get_weather(city: str) -> str:
 # list_dir
 # ===========================================================================
 
+
 @langchain_tool
 def list_dir(path: str = ".") -> str:
     """List files and subdirectories in a directory.
@@ -218,6 +220,7 @@ def list_dir(path: str = ".") -> str:
 # ===========================================================================
 # search_knowledge
 # ===========================================================================
+
 
 @langchain_tool
 def search_knowledge(query: str) -> str:

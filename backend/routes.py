@@ -30,34 +30,34 @@ import re
 
 _EMOJI_RE = re.compile(
     "["
-    "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-    "\U0001F680-\U0001F6FF"  # transport & map
-    "\U0001F1E0-\U0001F1FF"  # flags
-    "\U0001F900-\U0001F9FF"  # supplemental symbols
-    "\U0001FA00-\U0001FA6F"  # chess symbols
-    "\U0001FA70-\U0001FAFF"  # symbols extended-A
-    "\U00002600-\U000026FF"  # misc symbols
-    "\U00002702-\U000027B0"  # dingbats
-    "\U0000FE00-\U0000FE0F"  # variation selectors
-    "\U0001F3FB-\U0001F3FF"  # skin tone modifiers
-    "\U0000200D"             # zero-width joiner
-    "\U00002328-\U0000232A"  # keyboard symbols
-    "\U000023CF"
-    "\U000023E9-\U000023F3"
-    "\U000023F8-\U000023FA"
-    "\U000024C2"
-    "\U000025AA-\U000025AB"
-    "\U000025B6"
-    "\U000025C0"
-    "\U000025FB-\U000025FE"
+    "\U0001f600-\U0001f64f"  # emoticons
+    "\U0001f300-\U0001f5ff"  # symbols & pictographs
+    "\U0001f680-\U0001f6ff"  # transport & map
+    "\U0001f1e0-\U0001f1ff"  # flags
+    "\U0001f900-\U0001f9ff"  # supplemental symbols
+    "\U0001fa00-\U0001fa6f"  # chess symbols
+    "\U0001fa70-\U0001faff"  # symbols extended-A
+    "\U00002600-\U000026ff"  # misc symbols
+    "\U00002702-\U000027b0"  # dingbats
+    "\U0000fe00-\U0000fe0f"  # variation selectors
+    "\U0001f3fb-\U0001f3ff"  # skin tone modifiers
+    "\U0000200d"  # zero-width joiner
+    "\U00002328-\U0000232a"  # keyboard symbols
+    "\U000023cf"
+    "\U000023e9-\U000023f3"
+    "\U000023f8-\U000023fa"
+    "\U000024c2"
+    "\U000025aa-\U000025ab"
+    "\U000025b6"
+    "\U000025c0"
+    "\U000025fb-\U000025fe"
     "\U00002934-\U00002935"
-    "\U00002B05-\U00002B07"
-    "\U00002B1B-\U00002B1C"
-    "\U00002B50"
-    "\U00002B55"
+    "\U00002b05-\U00002b07"
+    "\U00002b1b-\U00002b1c"
+    "\U00002b50"
+    "\U00002b55"
     "\U00003030"
-    "\U0000303D"
+    "\U0000303d"
     "\U00003297"
     "\U00003299"
     "]+",
@@ -74,24 +74,21 @@ def _strip_emoji(text: str) -> str:
 # LLMs occasionally emit these as emotional asides or stage directions.
 # Previous approach used a keyword list but LLMs invent new phrases outside the list.
 # Now: remove ALL content inside Chinese/English parentheses — broad and reliable.
-_ACTION_TAG_RE = re.compile(r'[（(][^）)]*[）)]')
+_ACTION_TAG_RE = re.compile(r"[（(][^）)]*[）)]")
 
 
 def _strip_action_tags(text: str) -> str:
     """Remove ALL parenthetical content (Chinese or English brackets)."""
-    return _ACTION_TAG_RE.sub('', text).strip()
+    return _ACTION_TAG_RE.sub("", text).strip()
 
 
 # Symbols that TTS cannot pronounce or sound bad — strip before synthesis.
-_SYMBOL_RE = re.compile(
-    r'[\*#_`\|>～〜☆★♪♫♥❤→←↑↓▼▲◆◇◎●○◉◎※〓]'
-    r'|(?:\*\*|__|~~|--|——)'
-)
+_SYMBOL_RE = re.compile(r"[\*#_`\|>～〜☆★♪♫♥❤→←↑↓▼▲◆◇◎●○◉◎※〓]" r"|(?:\*\*|__|~~|--|——)")
 
 
 def _strip_symbols(text: str) -> str:
     """Remove markdown formatting and symbols that TTS cannot pronounce."""
-    return _SYMBOL_RE.sub('', text).strip()
+    return _SYMBOL_RE.sub("", text).strip()
 
 
 def _wav_duration(data: bytes) -> int:
@@ -100,6 +97,7 @@ def _wav_duration(data: bytes) -> int:
     Falls back to estimating from byte size if header is invalid.
     """
     import struct
+
     try:
         # WAV header: RIFF ... fmt  -> sample_rate at byte 24, byte_rate at byte 28
         if len(data) >= 44 and data[:4] == b"RIFF":
@@ -116,9 +114,8 @@ def _wav_duration(data: bytes) -> int:
     return int(len(data) * 1000 / 48000)
 
 
-
-
 # --- Request/Response schemas ---
+
 
 class ChatRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000, description="User message")
@@ -136,6 +133,7 @@ class HealthResponse(BaseModel):
 
 
 # --- Routes ---
+
 
 @router.post("/api/chat")
 async def chat(req: ChatRequest):
@@ -192,9 +190,7 @@ async def chat(req: ChatRequest):
                     # Synthesize with ChatTTS (offline, no proxy needed)
                     # ChatTTS does not provide word boundaries — viseme uses
                     # fixed per-character timing estimation (30ms/char)
-                    wav_bytes, _word_boundaries = await synthesize_with_word_boundary(
-                        tts_text
-                    )
+                    wav_bytes, _word_boundaries = await synthesize_with_word_boundary(tts_text)
                     audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
 
                     # Calculate audio duration from WAV header

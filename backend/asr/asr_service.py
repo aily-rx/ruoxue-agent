@@ -105,10 +105,7 @@ class ASRService:
                 model_file = onnx_files[0]
 
         if model_file is None:
-            raise FileNotFoundError(
-                f"No ONNX model found in {model_dir}. "
-                f"Expected model.int8.onnx or model.onnx"
-            )
+            raise FileNotFoundError(f"No ONNX model found in {model_dir}. " f"Expected model.int8.onnx or model.onnx")
 
         tokens_file = model_dir / "tokens.txt"
         if not tokens_file.exists():
@@ -119,9 +116,7 @@ class ASRService:
                     tokens_file = p
                     break
             else:
-                raise FileNotFoundError(
-                    f"Tokens file not found in {model_dir}"
-                )
+                raise FileNotFoundError(f"Tokens file not found in {model_dir}")
 
         print(f"[ASR] Loading SenseVoice model from {model_file}")
         self._recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
@@ -161,6 +156,7 @@ class ASRService:
         emotion = "neutral"
 
         import re
+
         lang_match = re.search(r"<\|(\w+)\|>", result_text)
         if lang_match:
             language = lang_match.group(1)

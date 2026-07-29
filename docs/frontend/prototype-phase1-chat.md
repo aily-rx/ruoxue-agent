@@ -202,4 +202,3 @@
 ---
 
 *Phase 2 原型: prototype-phase2-voice.md | Phase 3 原型: prototype-phase3-live2d.md*
-

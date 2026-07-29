@@ -46,9 +46,7 @@ class ConversationMemory:
 
     def get_turn_count(self, session_id: str) -> int:
         """Return number of completed turns (assistant messages)."""
-        return sum(
-            1 for m in self._store[session_id] if m["role"] == "assistant"
-        )
+        return sum(1 for m in self._store[session_id] if m["role"] == "assistant")
 
 
 # Global singleton

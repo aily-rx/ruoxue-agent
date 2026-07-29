@@ -19,7 +19,7 @@ for spec in $NEW_SPECS; do
     echo "$content" | grep -qi "边界\|最大\|最小\|并发\|权限" && DIMS=$((DIMS+1))
     echo "$content" | grep -qi "时序\|异步\|顺序\|等待\|回调" && DIMS=$((DIMS+1))
     echo "$content" | grep -qi "依赖\|depend\|服务\|SDK\|API" && DIMS=$((DIMS+1))
-    
+
     if [ "$DIMS" -lt 5 ]; then
         echo "✗ grill-me: $spec 只覆盖了 $DIMS/5 个维度（数据/状态/边界/时序/依赖）"
         exit 1

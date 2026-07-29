@@ -42,6 +42,7 @@ def _embed(texts: list[str]) -> np.ndarray:
 # Text chunker
 # ---------------------------------------------------------------------------
 
+
 def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str]:
     """Split text into overlapping chunks, preferring natural boundaries."""
     text_len = len(text)
@@ -73,6 +74,7 @@ def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str
 # KnowledgeBase — FAISS-backed
 # ---------------------------------------------------------------------------
 
+
 class KnowledgeBase:
     """Indexes and searches docs using FAISS (per PRD) + sentence-transformers."""
 
@@ -85,8 +87,8 @@ class KnowledgeBase:
         self._meta_path = self._dir / "knowledge_meta.json"
 
         self._index: faiss.Index | None = None
-        self._docs: list[str] = []       # aligned with index rows
-        self._metas: list[dict] = []     # metadata per chunk
+        self._docs: list[str] = []  # aligned with index rows
+        self._metas: list[dict] = []  # metadata per chunk
 
         if self._index_path.exists():
             self._load()
@@ -134,10 +136,9 @@ class KnowledgeBase:
             try:
                 if fp.suffix.lower() == ".pdf":
                     from pypdf import PdfReader
+
                     reader = PdfReader(str(fp))
-                    text = "\n".join(
-                        page.extract_text() or "" for page in reader.pages
-                    )
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
                 else:
                     text = fp.read_text(encoding="utf-8", errors="replace")
             except Exception:

@@ -1,4 +1,4 @@
-﻿"""Offline TTS synthesis via pyttsx3 (Windows SAPI5).
+"""Offline TTS synthesis via pyttsx3 (Windows SAPI5).
 
 Uses the system's built-in Chinese TTS voice (Microsoft Huihui).
 Fully offline — zero network, zero proxy, zero API key.
@@ -25,6 +25,7 @@ def _get_engine():
 
     try:
         import pyttsx3
+
         e = pyttsx3.init()
         # Auto-select Chinese voice
         for voice in e.getProperty("voices"):
@@ -34,7 +35,7 @@ def _get_engine():
                 break
         else:
             print("[TTS] No Chinese voice found, using default")
-        e.setProperty("rate", 200)     # speaking speed
+        e.setProperty("rate", 200)  # speaking speed
         e.setProperty("volume", 1.0)
         _engine = e
         return e

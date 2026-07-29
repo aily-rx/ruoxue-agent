@@ -14,9 +14,7 @@ _CJK_RE = re.compile(r"[一-鿿]")
 
 # Regex to split pinyin into initial + final
 # Examples: zhong -> (zh, ong), chang -> (ch, ang), a -> ("", a)
-_PINYIN_SPLIT_RE = re.compile(
-    r"^(b|p|m|f|d|t|n|l|g|k|h|j|q|x|zh|ch|sh|r|z|c|s|y|w)?(.*)$"
-)
+_PINYIN_SPLIT_RE = re.compile(r"^(b|p|m|f|d|t|n|l|g|k|h|j|q|x|zh|ch|sh|r|z|c|s|y|w)?(.*)$")
 
 
 def text_to_phonemes(text: str) -> list[dict]:
@@ -48,19 +46,23 @@ def text_to_phonemes(text: str) -> list[dict]:
             else:
                 initial, final = "", syllable
 
-            results.append({
-                "char": ch,
-                "initial": initial,
-                "final": final,
-                "is_cjk": True,
-            })
+            results.append(
+                {
+                    "char": ch,
+                    "initial": initial,
+                    "final": final,
+                    "is_cjk": True,
+                }
+            )
         else:
             # Non-CJK character: treat as short pause
-            results.append({
-                "char": ch,
-                "initial": "",
-                "final": "",
-                "is_cjk": False,
-            })
+            results.append(
+                {
+                    "char": ch,
+                    "initial": "",
+                    "final": "",
+                    "is_cjk": False,
+                }
+            )
 
     return results

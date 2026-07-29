@@ -17,23 +17,27 @@ from backend.tts.g2p_service import text_to_phonemes
 
 # ── Shape helpers ──
 
+
 def _s(a=0.0, i=0.0, u=0.0, e=0.0, o=0.0) -> dict[str, float]:
     return dict(A=a, I=i, U=u, E=e, O=o)
 
+
 # ── Simple vowel shapes ──
 VOWEL = {
-    "a": _s(a=0.95, o=0.25),                    # wide open
-    "o": _s(a=0.5, u=0.5, o=0.95),              # round open
-    "e": _s(a=0.45, i=0.2, e=0.95),             # half-open spread
-    "i": _s(a=0.18, i=0.95),                    # spread/smile
-    "u": _s(a=0.22, u=0.95, o=0.3),             # pursed round
-    "v": _s(a=0.18, i=0.7, u=0.5),              # ü — pursed-spread
-    "n": _s(a=0.15, i=0.1),                     # nasal coda — mouth closing
-    "ng":_s(a=0.15, u=0.1, o=0.1),              # velar nasal — back closing
+    "a": _s(a=0.95, o=0.25),  # wide open
+    "o": _s(a=0.5, u=0.5, o=0.95),  # round open
+    "e": _s(a=0.45, i=0.2, e=0.95),  # half-open spread
+    "i": _s(a=0.18, i=0.95),  # spread/smile
+    "u": _s(a=0.22, u=0.95, o=0.3),  # pursed round
+    "v": _s(a=0.18, i=0.7, u=0.5),  # ü — pursed-spread
+    "n": _s(a=0.15, i=0.1),  # nasal coda — mouth closing
+    "ng": _s(a=0.15, u=0.1, o=0.1),  # velar nasal — back closing
 }
+
 
 def _v(name: str) -> dict[str, float]:
     return dict(VOWEL.get(name, _s()))
+
 
 def _blend(*shapes: dict[str, float]) -> dict[str, float]:
     """Average multiple shapes."""
@@ -46,13 +50,12 @@ def _blend(*shapes: dict[str, float]) -> dict[str, float]:
         result[k] = round(result[k] / n, 2)
     return result
 
+
 def _mix(s1: dict, s2: dict, w1: float = 0.7) -> dict:
     """Weighted mix of two shapes."""
     w2 = 1.0 - w1
-    return {
-        k: round(s1.get(k, 0) * w1 + s2.get(k, 0) * w2, 2)
-        for k in ("A", "I", "U", "E", "O")
-    }
+    return {k: round(s1.get(k, 0) * w1 + s2.get(k, 0) * w2, 2) for k in ("A", "I", "U", "E", "O")}
+
 
 # ── Initial consonant mouth-prep ──
 INIT = {
@@ -73,12 +76,12 @@ INIT = {
     "zh": _s(a=0.12, u=0.25, e=0.08, o=0.15),
     "ch": _s(a=0.12, u=0.25, e=0.08, o=0.15),
     "sh": _s(a=0.12, u=0.25, e=0.08, o=0.15),
-    "r":  _s(a=0.12, u=0.25, e=0.08, o=0.15),
-    "z":  _s(i=0.45),
-    "c":  _s(i=0.45),
-    "s":  _s(i=0.45),
-    "y":  _s(i=0.65, u=0.08),
-    "w":  _s(u=0.65),
+    "r": _s(a=0.12, u=0.25, e=0.08, o=0.15),
+    "z": _s(i=0.45),
+    "c": _s(i=0.45),
+    "s": _s(i=0.45),
+    "y": _s(i=0.65, u=0.08),
+    "w": _s(u=0.65),
 }
 
 
