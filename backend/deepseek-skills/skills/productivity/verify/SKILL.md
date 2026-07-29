@@ -47,9 +47,10 @@ cd "$(dirname "$0")/.."
 PASS=0; FAIL=0
 check() { echo "--- $1 ---"; if "${@:2}" > /tmp/out 2>&1; then tail -3 /tmp/out; echo "  ✓ PASS"; PASS=$((PASS+1)); else tail -5 /tmp/out; echo "  ✗ FAIL"; FAIL=$((FAIL+1)); fi; echo; }
 
-# 以下命令从 CI 配置自动提取，不是手写的
-check "ruff"   ruff check .
-check "pytest" python -m pytest tests/ -q
+# 以下命令从 CI 配置自动提取，不是手写的——包括 lint/test/构建
+check "ruff"           ruff check .
+check "pytest"         python -m pytest tests/ -q
+check "docker-backend" docker build -q -f backend/Dockerfile backend/
 
 echo "PASS: $PASS  FAIL: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
@@ -70,6 +71,7 @@ echo "PASS: $PASS  FAIL: $FAIL"
 - **"改动太小，不用跑全量"** — 改一行 ESLint 配置可能影响 50 个文件
 - **跳过本地直接在 CI 里调试** — 本地 5 秒能发现的，推到 CI 等 2 分钟
 - **批量替换后不验证** — sed 可能删错行、破坏缩进、漏掉匹配
+- **只跑 lint/test 不跑 docker build** — 改了 Dockerfile 或依赖版本，lint 全过但构建时 FROM 镜像版本不兼容，到 CI 才暴露
 
 ## 适用场景
 

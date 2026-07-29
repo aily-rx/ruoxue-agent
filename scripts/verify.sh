@@ -37,6 +37,10 @@ check "pytest"      python -m pytest backend/tests/ -q --asyncio-mode=auto
 # ---- 前端 ----
 check "eslint"      bash -c "cd frontend && npm run lint"
 
+# ---- Docker 构建（对应 CI 的 build-and-push job）----
+check "docker-backend"   docker build -q -f backend/Dockerfile backend/
+check "docker-frontend"  docker build -q -f frontend/Dockerfile frontend/
+
 # ---- 结果 ----
 echo "============================="
 echo " PASS: $PASS  FAIL: $FAIL"
