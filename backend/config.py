@@ -4,7 +4,10 @@ All settings are read from environment variables with sensible defaults.
 Loads .env from project root first, then backend/.env (the latter overrides).
 """
 
+import json
+import logging
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,13 +34,44 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 # --- Conversation ---
 MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "20"))
 
-# --- TTS (Phase 2) ---
-TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
-# HTTP proxy for Edge TTS (needed if speech.platform.bing.com is blocked)
-# Example: "http://127.0.0.1:7890"
-TTS_PROXY = os.getenv("TTS_PROXY", os.getenv("HTTP_PROXY", os.getenv("http_proxy", ""))) or None
+# --- TTS (Phase 2) — offline via pyttsx3 (Windows SAPI5) ---
+# Uses system TTS voice (Microsoft Huihui). Zero network, zero proxy.
+
+# --- Agent Tools ---
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
 # --- ASR (Phase 2) ---
 # Default path is resolved relative to this config file (backend/ → project root)
 _ASR_DEFAULT = str(Path(__file__).resolve().parent.parent / "model_assets" / "asr" / "sensevoice-small-int8")
 ASR_MODEL_DIR = os.getenv("ASR_MODEL_DIR", _ASR_DEFAULT)
+
+# --- Structured Logging ---
+
+
+class JSONFormatter(logging.Formatter):
+    """Outputs log records as JSON lines for machine parsing."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[1]:
+            payload["exception"] = str(record.exc_info[1])
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    """Configure root logger to emit JSON-structured logs.
+
+    In local development, log lines are readable JSON. In production (e.g.
+    Docker + Loki), they can be indexed by timestamp/level/logger fields.
+    """
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Remove default handlers to avoid duplicate output
+    root.handlers = [handler]

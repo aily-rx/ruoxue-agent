@@ -9,16 +9,10 @@ This module remains as the canonical source for:
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from enum import Enum
-
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
 
 from backend.config import (
     DEEPSEEK_API_KEY,
@@ -27,6 +21,9 @@ from backend.config import (
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
 )
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 
 class Emotion(str, Enum):
@@ -98,10 +95,10 @@ def _build_llm() -> ChatOpenAI:
     """Create the LangChain LLM instance for DeepSeek."""
     return ChatOpenAI(
         model=DEEPSEEK_MODEL,
-        api_key=DEEPSEEK_API_KEY,
+        api_key=DEEPSEEK_API_KEY,  # type: ignore[arg-type]
         base_url=DEEPSEEK_BASE_URL,
         temperature=LLM_TEMPERATURE,
-        max_tokens=LLM_MAX_TOKENS,
+        max_tokens=LLM_MAX_TOKENS,  # type: ignore[call-arg]
         streaming=True,
     )
 
@@ -150,7 +147,7 @@ async def generate_reply(
         if not content:
             continue
 
-        full_text += content
+        full_text += str(content)
 
         # Try to extract emotion tag from accumulated text
         if not emotion_tag_sent:

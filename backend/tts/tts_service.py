@@ -1,72 +1,93 @@
-"""Edge TTS synthesis wrapper.
+﻿"""Offline TTS synthesis via pyttsx3 (Windows SAPI5).
 
-Free Microsoft Edge TTS service integration.
-Phase 2: basic synthesis.
+Uses the system's built-in Chinese TTS voice (Microsoft Huihui).
+Fully offline — zero network, zero proxy, zero API key.
 """
 
 from __future__ import annotations
 
-from io import BytesIO
+import asyncio
+import os
+import tempfile
 
-import edge_tts
+# Lazy-initialized engine singleton
+_engine = None
+_load_error: str | None = None
 
-from backend.config import TTS_VOICE
+
+def _get_engine():
+    """Create and configure pyttsx3 engine (once, with Chinese voice)."""
+    global _engine, _load_error
+    if _engine is not None:
+        return _engine
+    if _load_error is not None:
+        raise RuntimeError(_load_error)
+
+    try:
+        import pyttsx3
+        e = pyttsx3.init()
+        # Auto-select Chinese voice
+        for voice in e.getProperty("voices"):
+            if any(lang.startswith("zh") for lang in (voice.languages or [])):
+                e.setProperty("voice", voice.id)
+                print(f"[TTS] Using voice: {voice.name}")
+                break
+        else:
+            print("[TTS] No Chinese voice found, using default")
+        e.setProperty("rate", 200)     # speaking speed
+        e.setProperty("volume", 1.0)
+        _engine = e
+        return e
+    except Exception as exc:
+        _load_error = str(exc)
+        raise RuntimeError(f"pyttsx3 init failed: {exc}") from exc
 
 
-async def synthesize(
-    text: str,
-    voice: str = TTS_VOICE,
-    proxy: str | None = None,
-) -> bytes:
-    """Synthesize text into MP3 audio bytes using Edge TTS.
+def _synthesize_sync(text: str) -> bytes:
+    """Blocking synthesis — called via thread pool to avoid blocking event loop."""
+    engine = _get_engine()
+    # pyttsx3 save_to_file writes to a file path; use temp file
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        temp_path = f.name
+    try:
+        engine.save_to_file(text, temp_path)
+        engine.runAndWait()
+        with open(temp_path, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+async def synthesize(text: str) -> bytes:
+    """Synthesize Chinese text into WAV audio bytes.
 
     Args:
-        text: Chinese text to synthesize (practical limit ~3000 chars).
-        voice: Edge TTS voice name.
-        proxy: Optional HTTP proxy.
+        text: Chinese text to synthesize.
 
     Returns:
-        Complete MP3 audio as bytes.
+        WAV audio bytes (system default sample rate, mono).
     """
-    communicate = edge_tts.Communicate(text, voice, proxy=proxy)
-    buffer = BytesIO()
-
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            buffer.write(chunk["data"])
-
-    if buffer.tell() == 0:
-        raise RuntimeError("Edge TTS returned no audio data")
-
-    return buffer.getvalue()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _synthesize_sync, text)
 
 
 async def synthesize_with_word_boundary(
     text: str,
-    voice: str = TTS_VOICE,
+    voice: str = "",
     proxy: str | None = None,
 ) -> tuple[bytes, list[dict]]:
-    """Synthesize text with word boundary timing for viseme alignment.
+    """Synthesize with word boundaries (not supported by pyttsx3/SAPI5).
+
+    pyttsx3 does not provide word-level timing. This function returns
+    empty boundaries, so the viseme pipeline falls back to fixed-timing
+    estimation (ms_per_char). The voice and proxy parameters are
+    accepted for API compatibility but ignored.
 
     Returns:
-        Tuple of (mp3_bytes, word_boundaries).
-        Each boundary: {"offset": int (100ns units), "duration": int, "text": str}
+        Tuple of (wav_bytes, []) — always empty boundaries.
     """
-    communicate = edge_tts.Communicate(
-        text, voice, proxy=proxy,
-        boundary="WordBoundary",
-    )
-    buffer = BytesIO()
-    word_boundaries: list[dict] = []
-
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            buffer.write(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            word_boundaries.append({
-                "offset": chunk["offset"],
-                "duration": chunk["duration"],
-                "text": chunk["text"],
-            })
-
-    return buffer.getvalue(), word_boundaries
+    audio = await synthesize(text)
+    return audio, []

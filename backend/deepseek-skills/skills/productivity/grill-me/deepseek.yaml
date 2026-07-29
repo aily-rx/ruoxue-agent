@@ -1,0 +1,16 @@
+﻿name: grill-me
+display_name: "方案追问"
+type: model-invoked
+trigger_keywords:
+  - "分析一下"
+  - "这个方案"
+  - "怎么设计"
+  - "理一下思路"
+  - "帮我看看"
+  - "怎么做比较好"
+  - "帮我分析"
+  - "梳理一下"
+  - "可行性"
+  - "方案评估"
+tools_required: []
+priority: 9

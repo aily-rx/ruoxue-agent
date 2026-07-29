@@ -12,9 +12,7 @@ from io import BytesIO
 from pathlib import Path
 
 import sherpa_onnx
-
 from backend.config import ASR_MODEL_DIR
-
 
 # ---- WAV Decoder (stdlib, no extra deps) ----
 
@@ -108,15 +106,15 @@ class ASRService:
 
         if model_file is None:
             raise FileNotFoundError(
-                f"No ONNX model found in {model_dir}. " 
+                f"No ONNX model found in {model_dir}. "
                 f"Expected model.int8.onnx or model.onnx"
             )
 
         tokens_file = model_dir / "tokens.txt"
         if not tokens_file.exists():
             # Try alternative token filenames
-            for candidate in ["tokens.txt", "vocab.txt"]:
-                p = model_dir / candidate
+            for name in ["tokens.txt", "vocab.txt"]:
+                p = model_dir / name
                 if p.exists():
                     tokens_file = p
                     break
@@ -151,9 +149,9 @@ class ASRService:
 
         samples, sample_rate = _decode_wav_to_float32(wav_bytes)
 
-        stream = self._recognizer.create_stream()
+        stream = self._recognizer.create_stream()  # type: ignore[union-attr]
         stream.accept_waveform(sample_rate, samples)
-        self._recognizer.decode_stream(stream)
+        self._recognizer.decode_stream(stream)  # type: ignore[union-attr]
 
         result_text = stream.result.text if hasattr(stream.result, "text") else ""
 

@@ -7,19 +7,19 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import uuid
+from pathlib import Path
 
+from backend.agent.agent_graph import run_agent_stream
+from backend.agent.chroma_memory import chroma_memory
+from backend.agent.memory import memory
+from backend.asr.asr_service import asr_service
+from backend.tts.tts_service import synthesize_with_word_boundary
+from backend.tts.viseme_mapper import text_to_viseme_sequence
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-
-from backend.agent.agent_graph import run_agent_stream
-from backend.agent.memory import memory
-from backend.agent.chroma_memory import chroma_memory
-from backend.config import TTS_PROXY
-from backend.tts.tts_service import synthesize_with_word_boundary
-from backend.tts.viseme_mapper import text_to_viseme_sequence
-from backend.asr.asr_service import asr_service
 
 router = APIRouter()
 
@@ -94,20 +94,26 @@ def _strip_symbols(text: str) -> str:
     return _SYMBOL_RE.sub('', text).strip()
 
 
-def _mp3_duration(data: bytes) -> int:
-    """Calculate MP3 audio duration in milliseconds from frame count."""
-    frame_count = 0
-    i = 0
-    n = len(data)
-    while i < n - 1:
-        if data[i] == 0xFF and (data[i + 1] & 0xE0) == 0xE0:
-            frame_count += 1
-            i += 200
-        else:
-            i += 1
-    if frame_count == 0:
-        return int(len(data) * 8 * 1000 / 48000)
-    return int(frame_count * 1152 * 1000 / 44100)
+def _wav_duration(data: bytes) -> int:
+    """Calculate WAV audio duration in milliseconds from header.
+
+    Falls back to estimating from byte size if header is invalid.
+    """
+    import struct
+    try:
+        # WAV header: RIFF ... fmt  -> sample_rate at byte 24, byte_rate at byte 28
+        if len(data) >= 44 and data[:4] == b"RIFF":
+            sample_rate: int = struct.unpack_from("<I", data, 24)[0]
+            data_size: int = struct.unpack_from("<I", data, 40)[0]
+            channels: int = struct.unpack_from("<H", data, 22)[0]
+            bits_per_sample: int = struct.unpack_from("<H", data, 34)[0]
+            bytes_per_second = sample_rate * channels * (bits_per_sample // 8)
+            if bytes_per_second > 0:
+                return int(data_size * 1000 / bytes_per_second)
+    except Exception:
+        pass
+    # Fallback: estimate from raw size (24kHz 16-bit mono = 48000 bytes/s)
+    return int(len(data) * 1000 / 48000)
 
 
 
@@ -156,7 +162,7 @@ async def chat(req: ChatRequest):
                     clean = _strip_emoji(clean)
                     clean = _strip_symbols(clean)
                     if clean:
-                        yield f"event: token\n"
+                        yield "event: token\n"
                         yield f"data: {json.dumps({'text': clean}, ensure_ascii=False)}\n"
                         yield "\n"
                     continue
@@ -183,45 +189,27 @@ async def chat(req: ChatRequest):
                     if not tts_text:
                         tts_text = full_reply  # fallback if everything was stripped
 
-                    # Synthesize with word boundaries for precise viseme timing
-                    mp3_bytes, word_boundaries = await synthesize_with_word_boundary(
-                        tts_text, proxy=TTS_PROXY
+                    # Synthesize with ChatTTS (offline, no proxy needed)
+                    # ChatTTS does not provide word boundaries — viseme uses
+                    # fixed per-character timing estimation (30ms/char)
+                    wav_bytes, _word_boundaries = await synthesize_with_word_boundary(
+                        tts_text
                     )
-                    audio_b64 = base64.b64encode(mp3_bytes).decode("ascii")
+                    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
 
-                    # Calculate precise audio duration from word boundaries (100ns → ms)
-                    audio_duration_ms = 0
-                    if word_boundaries:
-                        last = word_boundaries[-1]
-                        audio_duration_ms = int((last["offset"] + last["duration"]) / 10000)
-                    if audio_duration_ms <= 0:
-                        audio_duration_ms = _mp3_duration(mp3_bytes)  # fallback
-                    print(f"[TTS] duration={audio_duration_ms}ms, words={len(word_boundaries)}, text_len={len(tts_text)}")
+                    # Calculate audio duration from WAV header
+                    audio_duration_ms = _wav_duration(wav_bytes)
+                    print(f"[TTS] duration={audio_duration_ms}ms, text_len={len(tts_text)}")
 
-                    yield f"event: audio\n"
-                    yield f"data: {json.dumps({'base64': audio_b64, 'format': 'mp3', 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
+                    yield "event: audio\n"
+                    yield f"data: {json.dumps({'base64': audio_b64, 'format': 'wav', 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
                     yield "\n"
 
-                    # Build per-character durations from WordBoundary data.
-                    # Edge TTS returns word-level boundaries; distribute each word's
-                    # duration evenly across its characters for per-character viseme timing.
-                    char_durations: list[float] | None = None
-                    if word_boundaries:
-                        char_durations = []
-                        for wb in word_boundaries:
-                            wb_text = wb.get("text", "")
-                            wb_duration_ms = wb["duration"] / 10000.0  # 100ns → ms
-                            char_count = len(wb_text)
-                            if char_count > 0:
-                                dur_per_char = wb_duration_ms / char_count
-                                for _ in range(char_count):
-                                    char_durations.append(dur_per_char)
-
-                    # Generate viseme sequence with WordBoundary-based per-character timing
+                    # Generate viseme sequence with fixed per-character timing
                     viseme_seq = text_to_viseme_sequence(
                         tts_text,
                         ms_per_char=30.0,
-                        char_durations=char_durations,
+                        char_durations=None,
                     )
                     if viseme_seq and audio_duration_ms > 0:
                         raw_last_ms = viseme_seq[-1]["time_ms"]
@@ -230,7 +218,7 @@ async def chat(req: ChatRequest):
                             for v in viseme_seq:
                                 v["time_ms"] = round(v["time_ms"] * scale, 1)
 
-                    yield f"event: viseme\n"
+                    yield "event: viseme\n"
                     yield f"data: {json.dumps(viseme_seq, ensure_ascii=False)}\n"
                     yield "\n"
                 except Exception as tts_err:
@@ -247,12 +235,12 @@ async def chat(req: ChatRequest):
                 except Exception as e:
                     print(f"[Chroma] store_turn error: {e}")
 
-            yield f"event: done\n"
-            yield f"data: {{}}\n"
+            yield "event: done\n"
+            yield "data: {}\n"
             yield "\n"
 
         except Exception as exc:
-            yield f"event: error\n"
+            yield "event: error\n"
             yield f"data: {json.dumps({'message': str(exc), 'code': 500}, ensure_ascii=False)}\n"
             yield "\n"
 
@@ -287,7 +275,7 @@ async def asr_recognize(file: UploadFile = File(...)):
         result = asr_service.recognize(wav_bytes)
         return result
     except Exception as exc:
-        raise HTTPException(500, f"ASR failed: {exc}")
+        raise HTTPException(500, f"ASR failed: {exc}") from exc
 
 
 @router.post("/api/upload")
@@ -296,7 +284,7 @@ async def upload_file(file: UploadFile = File(...)):
 
     Max 20 MB. Supported: text, PDF, documents.
     """
-    MAX_SIZE = 20 * 1024 * 1024  # 20 MB
+    max_size = 20 * 1024 * 1024  # 20 MB
 
     # Sanitize: extract only the base filename (prevents path traversal)
     filename = file.filename or "unknown"
@@ -306,15 +294,13 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(400, "Invalid filename")
 
     # Ensure uploads directory exists
-    import os
-    from pathlib import Path
     upload_dir = Path(__file__).resolve().parent / "uploads"
     upload_dir.mkdir(exist_ok=True)
 
     # Read file, checking size
     contents = await file.read()
-    if len(contents) > MAX_SIZE:
-        raise HTTPException(400, f"File too large (max {MAX_SIZE // 1024 // 1024} MB)")
+    if len(contents) > max_size:
+        raise HTTPException(400, f"File too large (max {max_size // 1024 // 1024} MB)")
 
     # Write to disk
     filepath = upload_dir / safe_name

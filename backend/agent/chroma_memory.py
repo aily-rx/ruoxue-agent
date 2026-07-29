@@ -8,12 +8,11 @@ context for each new query.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 
 import chromadb
 from chromadb.utils import embedding_functions
-
 
 # ---------------------------------------------------------------------------
 # ChromaMemory — singleton service
@@ -32,7 +31,7 @@ class ChromaMemory:
         self._embed_fn = embedding_functions.DefaultEmbeddingFunction()
         self._collection = self._client.get_or_create_collection(
             name="ruoxue_conversations",
-            embedding_function=self._embed_fn,
+            embedding_function=self._embed_fn,  # type: ignore[arg-type]
             metadata={"description": "Ruoxue conversation history"},
         )
 
@@ -56,7 +55,7 @@ class ChromaMemory:
                     "session_id": session_id,
                     "user_text": user_text[:500],
                     "assistant_text": assistant_text[:500],
-                    "stored_at": datetime.now(timezone.utc).isoformat(),
+                    "stored_at": datetime.now(UTC).isoformat(),
                 }],
                 ids=[turn_id],
             )

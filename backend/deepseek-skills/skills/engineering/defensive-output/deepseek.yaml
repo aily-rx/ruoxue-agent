@@ -1,0 +1,19 @@
+﻿name: defensive-output
+display_name: "LLM输出防护"
+type: model-invoked
+trigger_keywords:
+  - "过滤"
+  - "清洗"
+  - "LLM输出"
+  - "TTS"
+  - "语音合成"
+  - "emoji"
+  - "符号"
+  - "输出不可信"
+  - "防御性"
+  - "parse失败"
+  - "解析JSON"
+  - "下游消费"
+  - "正则过滤"
+tools_required: []
+priority: 8

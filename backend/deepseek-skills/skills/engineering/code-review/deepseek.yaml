@@ -1,0 +1,13 @@
+﻿name: code-review
+display_name: "代码审查"
+type: model-invoked
+trigger_keywords:
+  - "审查"
+  - "review"
+  - "看看代码"
+  - "检查一下"
+  - "代码质量"
+  - "有没有问题"
+  - "反模式"
+tools_required: []
+priority: 6

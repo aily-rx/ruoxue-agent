@@ -6,8 +6,8 @@ FastAPI application serving the AI Agent API.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Allow running from any directory (e.g. python main.py inside backend/)
 _proj_root = Path(__file__).resolve().parent.parent
@@ -15,11 +15,13 @@ if str(_proj_root) not in sys.path:
     sys.path.insert(0, str(_proj_root))
 
 import uvicorn
+from backend.config import HOST, PORT, setup_logging
+from backend.routes import router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import HOST, PORT
-from backend.routes import router
+# Initialize structured logging (JSON lines to stdout)
+setup_logging()
 
 
 @asynccontextmanager

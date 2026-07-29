@@ -1,9 +1,9 @@
-"""Agent tools for Phase 4.
+﻿"""Agent tools for Phase 4.
 
 Five tools:
-  - search_web     : DuckDuckGo web search
+  - search_web     : Tavily AI search (结构化结果，国内可直接访问)
   - read_file      : read local file (text + PDF)
-  - get_weather    : weather via DuckDuckGo search
+  - get_weather    : weather via wttr.in (零 API Key，国内可访问)
   - list_dir       : list directory contents
   - search_knowledge : search local FAISS knowledge base
 """
@@ -12,8 +12,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ddgs import DDGS
+import httpx
+from backend.config import TAVILY_API_KEY
 from langchain_core.tools import tool as langchain_tool
+from tavily import TavilyClient
+
+_tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 
 # ===========================================================================
@@ -22,25 +26,39 @@ from langchain_core.tools import tool as langchain_tool
 
 @langchain_tool
 def search_web(query: str) -> str:
-    """Search the web for current information.
+    """Search the web using Tavily AI search engine.
 
-    Use this when you need facts, news, or any information beyond your
-    knowledge cutoff. Returns top 5 results with title, URL, and snippet.
+    Returns AI-summarized results with full content extraction (not just snippets).
+    Results include a ready-to-use answer summary and detailed result pages.
+    Works in China without proxy. Best for factual, current, or research queries.
 
     Args:
-        query: Search query string (e.g., "Beijing weather forecast")
+        query: Search query string (e.g., "Python 3.13 new features")
     """
     try:
-        results = list(DDGS().text(query, max_results=5))
-        if not results:
-            return "No results found."
+        response = _tavily.search(query, max_results=5, include_answer=True)
         lines: list[str] = []
+
+        # AI-generated answer summary (Tavily 的核心优势)
+        if response.get("answer"):
+            lines.append(f"【AI 摘要】{response['answer']}\n")
+
+        # Detailed results
+        results = response.get("results", [])
+        if not results:
+            return "No results found." if not lines else "\n".join(lines)
+
+        lines.append("【详细结果】")
         for i, r in enumerate(results, 1):
             title = r.get("title", "No title")
-            href = r.get("href", "")
-            body = r.get("body", "")
-            lines.append(f"{i}. {title}\n   {body}\n   {href}")
-        return "\n\n".join(lines)
+            url = r.get("url", "")
+            content = r.get("content", "")
+            score = r.get("score", 0)
+            lines.append(f"{i}. {title} (相关性: {score:.0%})")
+            if content:
+                lines.append(f"   {content}")
+            lines.append(f"   {url}")
+        return "\n".join(lines)
     except Exception as e:
         return f"Search error: {e}"
 
@@ -74,6 +92,7 @@ def read_file(path: str) -> str:
     if suffix == ".pdf":
         try:
             from pypdf import PdfReader
+
             reader = PdfReader(str(filepath))
             content = "\n".join(
                 page.extract_text() or "" for page in reader.pages
@@ -99,29 +118,55 @@ def read_file(path: str) -> str:
 
 @langchain_tool
 def get_weather(city: str) -> str:
-    """Get current weather by searching the web via DuckDuckGo.
+    """Get current weather from wttr.in (free, no API key, no proxy needed).
 
-    No API key required. Works globally for any city name.
-    The LLM will read the search results and extract temperature,
-    conditions, and forecast.
+    Returns temperature, conditions, humidity, and wind for any city worldwide.
+    Works in China without proxy. City name supports Chinese and English.
 
     Args:
         city: City name in Chinese or English (e.g., "北京", "Shanghai", "Tokyo")
     """
     try:
-        results = list(DDGS().text(f"{city} 今天天气 温度", max_results=4))
-        if not results:
+        resp = httpx.get(
+            f"https://wttr.in/{city}",
+            params={"format": "j1"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        current = data.get("current_condition", [{}])[0]
+        if not current:
             return f"未找到 {city} 的天气信息"
 
-        lines = [f"{city} 天气查询结果："]
-        for r in results:
-            title = r.get("title", "")
-            body = r.get("body", "")
-            if title and "天气" in title:
-                lines.append(f"■ {title}")
-            if body:
-                lines.append(f"  {body}")
-        return "\n".join(lines)
+        temp_c = current.get("temp_C", "?")
+        feels_like = current.get("FeelsLikeC", "?")
+        humidity = current.get("humidity", "?")
+        wind_speed = current.get("windspeedKmph", "?")
+        wind_dir = current.get("winddir16Point", "?")
+        weather_desc = current.get("weatherDesc", [{}])[0].get("value", "未知")
+        visibility = current.get("visibility", "?")
+
+        forecast_lines: list[str] = []
+        weather_data = data.get("weather", [])
+        for day in weather_data[:3]:
+            date = day.get("date", "")
+            max_t = day.get("maxtempC", "?")
+            min_t = day.get("mintempC", "?")
+            desc = day.get("hourly", [{}])[4].get("weatherDesc", [{}])[0].get("value", "?")
+            forecast_lines.append(f"  {date}: {min_t}°C ~ {max_t}°C, {desc}")
+
+        return (
+            f"【{city} 当前天气】\n"
+            f"  温度: {temp_c}°C (体感 {feels_like}°C)\n"
+            f"  天气: {weather_desc}\n"
+            f"  湿度: {humidity}%\n"
+            f"  风速: {wind_speed} km/h ({wind_dir})\n"
+            f"  能见度: {visibility} km\n"
+            f"\n【未来预报】\n" + "\n".join(forecast_lines)
+        )
+    except httpx.HTTPError as e:
+        return f"天气查询网络错误: {e}"
     except Exception as e:
         return f"天气查询失败: {e}"
 
@@ -186,6 +231,7 @@ def search_knowledge(query: str) -> str:
     """
     try:
         from backend.agent.rag_service import knowledge_base
+
         result = knowledge_base.search(query)
         return result
     except Exception as e:

@@ -7,13 +7,11 @@ Uses Chroma's bundled ONNX embedding (all-MiniLM-L6-v2, 384-dim).
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 
 import faiss
 import numpy as np
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-
 
 # ---------------------------------------------------------------------------
 # Embedding — reuses Chroma's bundled ONNX model (all-MiniLM-L6-v2, 384-dim)
@@ -100,7 +98,7 @@ class KnowledgeBase:
     def _load(self) -> None:
         try:
             self._index = faiss.read_index(str(self._index_path))
-            with open(self._meta_path, "r", encoding="utf-8") as f:
+            with open(self._meta_path, encoding="utf-8") as f:
                 data = json.load(f)
             self._docs = data.get("docs", [])
             self._metas = data.get("metas", [])

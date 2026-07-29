@@ -5,16 +5,32 @@ Architecture:
               ↑                                      │
               └──────────────────────────────────────┘
 
-State uses a three-layer prompt: system_prompt (static persona)
-+ runtime_context (date) + memory_context (Chroma).
+State uses a four-layer prompt: system_prompt (static persona)
++ runtime_context (date) + memory_context (Chroma) + skill_context (DeepSeek Skills).
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+import sys
+from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
-from typing import Annotated, Sequence
+from pathlib import Path
+from typing import Annotated
 
+from backend.agent.chroma_memory import chroma_memory
+from backend.agent.emotional_agent import (
+    EMOTION_SYSTEM_PROMPT,
+    EMOTION_TAG_RE,
+    SSEEvent,
+)
+from backend.agent.tools import AGENT_TOOLS
+from backend.config import (
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
+    LLM_MAX_TOKENS,
+    LLM_TEMPERATURE,
+)
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -28,21 +44,21 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
-from backend.config import (
-    DEEPSEEK_API_KEY,
-    DEEPSEEK_BASE_URL,
-    DEEPSEEK_MODEL,
-    LLM_MAX_TOKENS,
-    LLM_TEMPERATURE,
-)
-from backend.agent.emotional_agent import (
-    EMOTION_SYSTEM_PROMPT,
-    EMOTION_TAG_RE,
-    SSEEvent,
-)
-from backend.agent.tools import AGENT_TOOLS
-from backend.agent.chroma_memory import chroma_memory
+# ---------------------------------------------------------------------------
+# DeepSeek Skills — dynamic prompt injection
+# ---------------------------------------------------------------------------
 
+_deepseek_skills_path = str(
+    Path(__file__).resolve().parent.parent / "deepseek-skills"
+)
+if _deepseek_skills_path not in sys.path:
+    sys.path.insert(0, _deepseek_skills_path)
+
+from skill_loader import SkillLoader  # noqa: E402
+
+_skill_loader = SkillLoader(
+    str(Path(__file__).resolve().parent.parent / "deepseek-skills" / "skills")
+)
 
 # ---------------------------------------------------------------------------
 # LangGraph State
@@ -51,16 +67,18 @@ from backend.agent.chroma_memory import chroma_memory
 class AgentState(TypedDict):
     """State carried through the agent graph.
 
-    Three-layer prompt architecture:
-      system_prompt  — static:  persona, emotion rules, reply format
+    Four-layer prompt architecture:
+      system_prompt   — static:  persona, emotion rules, reply format
       runtime_context — dynamic: date/time (future: user profile, emotion state)
       memory_context  — retrieval: Chroma long-term memory
+      skill_context   — dynamic: matched DeepSeek Skill prompt (engineering/productivity)
     """
 
     messages: Annotated[Sequence[BaseMessage], add_messages]
     system_prompt: str
     runtime_context: str
     memory_context: str
+    skill_context: str
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +88,10 @@ class AgentState(TypedDict):
 def _build_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=DEEPSEEK_MODEL,
-        api_key=DEEPSEEK_API_KEY,
+        api_key=DEEPSEEK_API_KEY,  # type: ignore[arg-type]
         base_url=DEEPSEEK_BASE_URL,
         temperature=LLM_TEMPERATURE,
-        max_tokens=LLM_MAX_TOKENS,
+        max_tokens=LLM_MAX_TOKENS,  # type: ignore[call-arg]
         streaming=True,
     )
 
@@ -91,12 +109,14 @@ async def agent_node(state: AgentState) -> dict:
     llm = _build_llm()
     llm_with_tools = llm.bind_tools(AGENT_TOOLS)
 
-    # Layer 1: static persona  |  Layer 2: runtime  |  Layer 3: long-term memory
+    # Layer 1: static persona  |  Layer 2: runtime  |  Layer 3: long-term memory  |  Layer 4: skill
     parts = [state["system_prompt"]]
     if state["runtime_context"]:
         parts.append(state["runtime_context"])
     if state["memory_context"]:
         parts.append(state["memory_context"])
+    if state["skill_context"]:
+        parts.append(state["skill_context"])
     system_text = "\n\n".join(parts)
 
     system = SystemMessage(content=system_text)
@@ -144,10 +164,11 @@ async def run_agent_stream(
 ) -> AsyncGenerator[SSEEvent, None]:
     """Stream the agent's reply token-by-token via SSE.
 
-    Builds a three-layer system prompt and hands it to LangGraph:
-      Layer 1 — system_prompt  (static persona from emotional_agent)
-      Layer 2 — runtime_context (current date, future: user profile)
-      Layer 3 — memory_context  (Chroma long-term memory)
+    Builds a four-layer system prompt and hands it to LangGraph:
+      Layer 1 — system_prompt   (static persona from emotional_agent)
+      Layer 2 — runtime_context  (current date, future: user profile)
+      Layer 3 — memory_context   (Chroma long-term memory)
+      Layer 4 — skill_context    (keyword-matched from deepseek-skills/)
     """
     # Layer 1: static persona (never changes)
     system_prompt = EMOTION_SYSTEM_PROMPT
@@ -170,6 +191,19 @@ async def run_agent_stream(
         print(f"[Chroma] retrieved context ({len(chroma_hits)} chars)")
     else:
         memory_context = ""  # skip if nothing relevant
+
+    # Layer 4: dynamic skill context (keyword-matched from deepseek-skills/)
+    skill_context = ""
+    skill_name = _skill_loader.match(user_text)
+    if skill_name:
+        skill_content = _skill_loader.load(skill_name)
+        if skill_content:
+            skill_context = (
+                f"[技能指令 — {skill_name}]\n"
+                "以下是适用于当前任务的专项指令，请严格遵循：\n\n"
+                f"{skill_content}"
+            )
+            print(f"[Skill] matched '{skill_name}' for input: {user_text[:50]}...")
 
     # --- Build LangChain messages from short-term history ---
     lc_messages: list[BaseMessage] = []
@@ -194,6 +228,7 @@ async def run_agent_stream(
             "system_prompt": system_prompt,
             "runtime_context": runtime_context,
             "memory_context": memory_context,
+            "skill_context": skill_context,
         },
         stream_mode="messages",
     ):
@@ -222,11 +257,11 @@ async def run_agent_stream(
             continue
         # --- End tool phase detection ---
 
-        content: str = chunk.content if isinstance(chunk.content, str) else ""
-        if not content:
+        chunk_text: str = chunk.content if isinstance(chunk.content, str) else ""
+        if not chunk_text:
             continue
 
-        full_text += content
+        full_text += chunk_text
 
         if not emotion_tag_sent:
             match = EMOTION_TAG_RE.match(full_text)
@@ -244,7 +279,7 @@ async def run_agent_stream(
                 continue
 
         if emotion_tag_sent:
-            yield SSEEvent(event="token", data={"text": content})
+            yield SSEEvent(event="token", data={"text": chunk_text})
 
     if not emotion_tag_sent:
         yield SSEEvent(

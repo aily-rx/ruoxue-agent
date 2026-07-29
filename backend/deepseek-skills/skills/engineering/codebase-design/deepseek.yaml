@@ -1,0 +1,21 @@
+﻿name: codebase-design
+display_name: "模块设计"
+type: model-invoked
+trigger_keywords:
+  - "设计模块"
+  - "模块接口"
+  - "接口设计"
+  - "模块化"
+  - "抽象层"
+  - "分层架构"
+  - "深模块"
+  - "seam"
+  - "可测试性"
+  - "重构模块"
+  - "模块拆分"
+  - "代码结构"
+  - "架构设计"
+  - "接口"
+  - "模块"
+tools_required: []
+priority: 5

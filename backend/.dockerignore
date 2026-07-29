@@ -1,0 +1,28 @@
+# 虚拟环境（容器内会单独 pip install）
+venv/
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本地数据（容器内用 volume 挂载）
+chroma_data/
+faiss_data/
+uploads/
+
+# 测试文件（不进生产镜像）
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 其他
+*.egg-info/
+.env
+.gitignore

@@ -79,3 +79,17 @@ Thumbs.db
 chroma_data/
 faiss_data/
 backend/uploads/
+
+# ==================== Testing & CI ====================
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+*.coverage
+
+# ==================== Docker ====================
+.docker/
+
+# ==================== Frontend build ====================
+frontend/dist/

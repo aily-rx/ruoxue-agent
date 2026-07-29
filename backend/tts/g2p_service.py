@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import re
 
-from pypinyin import pinyin, Style
-
+from pypinyin import Style, pinyin
 
 # Regex to match a single Chinese character
 _CJK_RE = re.compile(r"[一-鿿]")

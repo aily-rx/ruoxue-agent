@@ -106,8 +106,8 @@ npm install
 ### 6. 启动
 
 ```bash
-# 终端 1：启动后端
-cd backend
+# 终端 1：从项目根目录启动后端
+cd ruoxue-agent
 python -m backend.main          # → http://localhost:8000
 
 # 终端 2：启动前端
@@ -116,6 +116,35 @@ npm run dev                     # → http://localhost:5173
 ```
 
 打开浏览器访问 `http://localhost:5173`
+
+---
+
+## 🐳 Docker 快速启动（推荐）
+
+无需安装 Python/Node，一键启动：
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/你的用户名/ruoxue-agent.git
+cd ruoxue-agent
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env，填入 DEEPSEEK_API_KEY
+
+# 3. 一键启动
+docker compose up -d --build
+```
+
+打开浏览器访问 `http://localhost`（前端:80 → 后端:8000）
+
+```bash
+# 查看日志
+docker compose logs -f
+
+# 停止
+docker compose down
+```
 
 ---
 
