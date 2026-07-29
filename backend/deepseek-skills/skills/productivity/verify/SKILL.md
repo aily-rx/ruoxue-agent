@@ -1,6 +1,6 @@
 ﻿---
 name: verify
-description: 提交前全量验证——本地跑一遍 CI 的所有步骤，全部通过才能声称"没问题"。Use before git push, after making changes, or when claiming something "should work".
+description: 提交前全量验证——本地跑一遍 CI 所有步骤，全部通过才能声称没问题。Use before git push, after changes, or when claiming "should work"/"没问题了"/"ALL PASSED".
 ---
 
 # 提交前验证
@@ -11,47 +11,35 @@ description: 提交前全量验证——本地跑一遍 CI 的所有步骤，全
 
 ## 步骤
 
-### 1. 逐条对照 CI 命令
+### 1. 找到当前项目的 CI 配置
 
-打开 `.github/workflows/ci-cd.yml`，把每个 `run:` 后面的命令复制出来，在本地逐条执行——不要用"等价的"命令，要用完全一样的命令。
+项目可能用不同的 CI 系统，按优先级查找：
 
-```
-后端:
-  ruff check backend/
-  mypy backend/ --ignore-missing-imports --explicit-package-bases
-  python -m pytest backend/tests/ -q --asyncio-mode=auto     ← 注意是 python -m pytest 不是 pytest
+1. `.github/workflows/` — GitHub Actions，找 `ci*.yml`
+2. `.gitlab-ci.yml` — GitLab CI
+3. `Makefile` — 如果有 `test`/`lint` 目标
+4. `package.json` — 如果有 `scripts.test`/`scripts.lint`
 
-前端:
-  cd frontend && npm run lint
-```
+### 2. 提取所有验证命令
 
-### 2. 每步必须有输出
+从 CI 配置中提取每个 `run:` 后面的命令。不要用"等价的"命令，要用完全一样的。
 
-不是"没报错 = 过了"，是"明确打印了 PASS/Success/0 errors"。如果有 warning，确认 CI 会不会因此阻断。
+### 3. 逐条执行并记录结果
 
-### 3. 全部通过才算过
+每条命令执行完后明确报告 PASS/FAIL。如果有 warning，确认 CI 会不会因 warning 阻断。
 
-有一步失败 → 修 → 重跑全部（不是只重跑修过的那步）。因为修 A 可能破坏了 B。
+### 4. 全部通过才算过
 
-### 4. 确认无误后提交
-
-```bash
-./scripts/verify.sh  # 跑全量验证
-git push             # 全部通过后再推
-```
+有一步失败 → 修 → 重跑全部（不是只重跑修过的那步）。修 A 可能破坏 B。
 
 ## 反模式
 
-- **"本地跑过了"但实际上跑的命令不一样** — `pytest` vs `python -m pytest` 在 Windows 上结果可能不同
-- **"后端全过了，前端应该也没问题"** — CI 不区分前后端，前端 lint 挂了整个 job 就挂
-- **"这个改动太小了，不用跑全量"** — 你改了一行 ESLint 配置，可能影响 50 个文件
-- **跳过步骤直接在 CI 里调试** — 本地 5 秒能发现的问题，推到 CI 要等 2 分钟
-- **sed/批量替换后不验证** — 命令可能删错行、破坏缩进、漏掉第二个匹配
+- **"本地跑过了"但命令不一样** — `pytest` vs `python -m pytest` 结果可能不同
+- **"后端全过了，前端应该也没问题"** — CI 不区分前后端，前端挂了整个 job 挂
+- **"改动太小，不用跑全量"** — 改一行 ESLint 配置可能影响 50 个文件
+- **跳过本地直接在 CI 里调试** — 本地 5 秒能发现的，推到 CI 等 2 分钟
+- **批量替换后不验证** — sed 可能删错行、破坏缩进、漏掉匹配
 
-## 快速命令
+## 适用场景
 
-如果你有 `scripts/verify.sh`，一条命令跑完全量：
-
-```bash
-./scripts/verify.sh
-```
+本项目、React 项目、Python 项目、任何有 CI 配置的项目——skill 本身不绑定具体命令，到哪都能用。
