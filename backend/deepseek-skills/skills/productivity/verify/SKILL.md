@@ -73,6 +73,26 @@ echo "PASS: $PASS  FAIL: $FAIL"
 - **批量替换后不验证** — sed 可能删错行、破坏缩进、漏掉匹配
 - **只跑 lint/test 不跑 docker build** — 改了 Dockerfile 或依赖版本，lint 全过但构建时 FROM 镜像版本不兼容，到 CI 才暴露
 
+## 两层拦截
+
+不是所有检查都放到 push 时——开发类和构建类分开：
+
+```
+git commit  → pre-commit hook（快，<5s）
+  ├─ tdd              源码变更必须有测试
+  ├─ read-before-code  引用的文件必须存在
+  ├─ prototype-first   新组件必须有原型文档
+  ├─ codebase-design   公开函数必须有 docstring
+  ├─ grill-me          spec 覆盖 5 个维度
+  └─ diagnose-bugs     fix commit 含根因描述
+
+git push    → pre-push hook（慢，~60s）
+  ├─ ruff / mypy / pytest / eslint
+  ├─ docker build x2
+  ├─ defensive-output  TTS 前有过滤管道
+  └─ implement         无循环依赖
+```
+
 ## 适用场景
 
 本项目、React 项目、Python 项目、任何有 CI 配置的项目——skill 本身不绑定具体命令，到哪都能用。
