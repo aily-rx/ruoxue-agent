@@ -41,6 +41,11 @@ check "eslint"      bash -c "cd frontend && npm run lint"
 check "docker-backend"   docker build -q -f backend/Dockerfile backend/
 check "docker-frontend"  docker build -q -f frontend/Dockerfile frontend/
 
+# ---- 技能硬约束 ----
+check "defensive-output" bash scripts/check-defensive.sh
+check "prototype-first"  bash scripts/check-prototype.sh
+check "implement"        bash scripts/check-implement.sh
+
 # ---- 结果 ----
 echo "============================="
 echo " PASS: $PASS  FAIL: $FAIL"
