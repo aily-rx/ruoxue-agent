@@ -11,26 +11,57 @@ description: 提交前全量验证——本地跑一遍 CI 所有步骤，全部
 
 ## 步骤
 
-### 1. 找到当前项目的 CI 配置
+### 1. 第一次使用：初始化验证环境
 
-项目可能用不同的 CI 系统，按优先级查找：
+到这个新项目的第一件事——生成验证脚本和 git hook：
 
-1. `.github/workflows/` — GitHub Actions，找 `ci*.yml`
-2. `.gitlab-ci.yml` — GitLab CI
-3. `Makefile` — 如果有 `test`/`lint` 目标
-4. `package.json` — 如果有 `scripts.test`/`scripts.lint`
+```bash
+# 创建 scripts/verify.sh
+# 内容：从项目 CI 配置中提取所有 run: 命令，逐条执行并报告 PASS/FAIL
+# 示例模板见下方"脚本模板"
 
-### 2. 提取所有验证命令
+# 安装 git pre-push hook（硬拦截，不过不给推）
+cat > .git/hooks/pre-push << 'HOOK'
+#!/usr/bin/env bash
+cd "$(git rev-parse --show-toplevel)"
+bash scripts/verify.sh
+HOOK
+chmod +x .git/hooks/pre-push
+```
 
-从 CI 配置中提取每个 `run:` 后面的命令。不要用"等价的"命令，要用完全一样的。
+### 2. 日常使用：提交前自动验证
 
-### 3. 逐条执行并记录结果
+每次 `git push` 时 hook 自动触发，不需要手动记得跑。
 
-每条命令执行完后明确报告 PASS/FAIL。如果有 warning，确认 CI 会不会因 warning 阻断。
+### 3. 如果项目还没有 CI 配置
 
-### 4. 全部通过才算过
+先帮用户建立最基础的 CI（ruff/mypy/pytest 或 eslint/vitest），然后再生成 verify.sh。
 
-有一步失败 → 修 → 重跑全部（不是只重跑修过的那步）。修 A 可能破坏 B。
+## 验证脚本模板
+
+根据项目技术栈自动生成，核心逻辑：逐条执行 CI 命令 → 报告结果 → 有失败就 exit 1。
+
+```bash
+#!/usr/bin/env bash
+cd "$(dirname "$0")/.."
+PASS=0; FAIL=0
+check() { echo "--- $1 ---"; if "${@:2}" > /tmp/out 2>&1; then tail -3 /tmp/out; echo "  ✓ PASS"; PASS=$((PASS+1)); else tail -5 /tmp/out; echo "  ✗ FAIL"; FAIL=$((FAIL+1)); fi; echo; }
+
+# 以下命令从 CI 配置自动提取，不是手写的
+check "ruff"   ruff check .
+check "pytest" python -m pytest tests/ -q
+
+echo "PASS: $PASS  FAIL: $FAIL"
+[ "$FAIL" -eq 0 ] || exit 1
+```
+
+## 执行
+
+现在就开始——声明"没问题了"/"要提交"/"准备 push"之前：
+
+1. 如果项目还没有 `scripts/verify.sh` → 先生成它
+2. 跑一遍验证
+3. 全部通过才能继续
 
 ## 反模式
 
