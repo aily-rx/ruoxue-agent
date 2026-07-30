@@ -1,3 +1,29 @@
+## 硬约束（始终生效，不需要关键词触发）
+
+以下规则来自 `skills/CORE_RULES.md`，**每次对话自动执行，不可跳过**。
+
+### 行为准则
+
+1. **声称过关前先跑验证** — 说"没问题了""应该能过""ALL PASSED"之前，必须先实际执行项目的 CI 全部命令，亲眼看到全部 PASS。没跑过就是没跑过。
+2. **修改前先读文件** — 改任何文件前，先 `Read` 目标文件确认当前内容。不凭记忆和猜测——代码的当前状态比你的记忆准确。
+3. **批量操作后必须验证** — 批量替换（sed/正则/全局 Edit）之后，必须 `Read` 回文件内容确认修改正确。不依赖命令 exit code 作为唯一验证手段。
+4. **违规直接承认** — 如果用户指出你违反了以上准则，直接承认并说明具体违反了哪条，不要辩解。修完后把教训写进对应的 skill 文件。
+
+### 编码铁律
+
+5. **先读后写** — 写任何代码前，先回答三个问题：①依赖的数据源在哪？②真实结构确认了吗？（不是臆测，是实际读出来的）③假设和实际一致吗？不凭文档/记忆编参数名，必须读实际文件。
+6. **不凭猜测** — 不用"应该是""默认值是 0"之类的推断代替实际读取。Live2D 参数名不是 ParamMouthOpenY 而是 ParamA——除非你读过 `.exp3.json`。
+7. **防御性输出** — LLM 输出进入 TTS/JSON解析/代码执行前，必须先经过显式过滤管道。生成给用户看的内容必须可追溯、无臆测值。
+8. **依赖方向正确** — 上层依赖下层，核心层只依赖外部库。模块间通信走 EventBus，无直接跨层 import。不引入循环依赖。
+
+### Skill 使用
+
+9. 在 `skills/` 目录中搜索是否有对应的 skill 文件。skill 文件的 front matter 标注了 `name` 和 `trigger_keywords`。对于复杂或高风险任务，主动匹配并加载对应 skill。
+
+---
+
+## 项目信息
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -369,3 +395,20 @@ Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/
 | `docs/phase2-summary.md` | Phase 2 完成总结（ASR/TTS/G2P/Viseme 管线、录放音、音画同步） |
 | `docs/phase1-summary.md` | Phase 1 完成总结（SSE 流式、情绪标签、会话记忆、聊天 UI） |
 | `Agent.md` | 共享知识库索引（经验文档触发机制、命名规范、架构规则） |
+<!-- SKILLS:START -->
+
+| Skill | 触发关键词 | 位置 |
+|-------|-----------|------|
+| codebase-design | 模块设计 (设计模块...) | `skills/engineering/codebase-design/` |
+| code-review | 代码审查 (审查...) | `skills/engineering/code-review/` |
+| defensive-output | LLM输出防护 (过滤...) | `skills/engineering/defensive-output/` |
+| diagnose-bugs | Bug诊断 (bug...) | `skills/engineering/diagnose-bugs/` |
+| implement | 实现 (按依赖方向...) | `skills/engineering/implement/` |
+| prototype-first | 原型先行 (页面布局...) | `skills/engineering/prototype-first/` |
+| read-before-code | 先读后写 (对接...) | `skills/engineering/read-before-code/` |
+| tdd | TDD测试驱动 (写测试...) | `skills/engineering/tdd/` |
+| grill-me | 方案追问 (分析一下...) | `skills/productivity/grill-me/` |
+| handoff | 会话交接 (总结一下...) | `skills/productivity/handoff/` |
+| verify | 提交前验证 (提交...) | `skills/productivity/verify/` |
+
+<!-- SKILLS:END -->

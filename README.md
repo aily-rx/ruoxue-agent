@@ -10,140 +10,95 @@
 | 阶段 | 功能 | 状态 |
 |------|------|:--:|
 | Phase 1 | 文字聊天 — SSE 流式对话 + 情绪标签 + 会话记忆 | ✅ |
-| Phase 2 | 语音交互 — ASR 语音识别 + TTS 语音合成 + 口型同步 | ✅ |
-| Phase 3 | 数字人 — Live2D 模型渲染 + 表情驱动 + Motion 语境动画 | ✅ |
+| Phase 2 | 语音交互 — ASR 语音识别 + Edge TTS 神经语音 + 口型同步 (Viseme) | ✅ |
+| Phase 3 | 数字人 — Live2D 模型渲染 + 5 参数口型 + 表情驱动 + Motion 语境动画 | ✅ |
 | Phase 4 | Agent — LangGraph + 5 个工具 + Chroma 记忆 + FAISS 知识库 | ✅ |
 
 ### Agent 工具
 
-| 工具 | 功能 |
-|------|------|
-| `search_web` | DuckDuckGo 网页搜索 |
-| `read_file` | 读取本地文件（文本 + PDF） |
-| `get_weather` | 实时天气查询 |
-| `list_dir` | 浏览目录 |
-| `search_knowledge` | 搜索本地 FAISS 知识库 |
+| 工具 | 实现 | 功能 |
+|------|------|------|
+| `search_web` | Tavily Search API | 结构化网页搜索 |
+| `read_file` | Python stdlib + pypdf | 读取本地文件（文本 + PDF） |
+| `get_weather` | wttr.in（零 API Key） | 实时天气查询 |
+| `list_dir` | Python stdlib | 浏览目录 |
+| `search_knowledge` | FAISS + all-MiniLM-L6-v2 | 搜索本地知识库 |
 
 ---
 
 ## 技术栈
 
 ```
-前端：React 18 + TypeScript + Vite 6 + Live2D Cubism SDK 5 + WebGL
+前端：React 18 + TypeScript (strict) + Vite 6 + Live2D Cubism SDK 5 (WebGL 2)
 后端：Python 3.12 + FastAPI + LangGraph + LangChain + ChromaDB + FAISS
-模型：DeepSeek-V4 + SenseVoice Small + Edge TTS + all-MiniLM-L6-v2
-```
-
----
-
-## 架构
-
-```
-┌─────────────────────────────────────────┐
-│  React App (ChatPanel + Live2DCanvas)   │  前端 :5173
-├─────────────────────────────────────────┤
-│  SSE Stream / HTTP Upload / ASR         │  传输层
-├─────────────────────────────────────────┤
-│  FastAPI routes (/api/chat, /api/asr)   │  后端 :8000
-├─────────────────────────────────────────┤
-│  LangGraph Agent                        │
-│  ┌─────────────────────────────────┐    │
-│  │ agent_node → should_continue    │    │
-│  │     │              │            │    │
-│  │     └── tools ←────┘            │    │
-│  │         (5 tools)               │    │
-│  └─────────────────────────────────┘    │
-├─────────────────────────────────────────┤
-│  Memory: Chroma (long-term) + dict     │
-│  Knowledge: FAISS (12k+ chunks)        │
-├─────────────────────────────────────────┤
-│  DeepSeek API / Edge TTS / SenseVoice   │  外部服务
-└─────────────────────────────────────────┘
+TTS：  Edge TTS (29 个神经语音, 主引擎) + pyttsx3/SAPI5 (离线兜底)
+ASR：  SenseVoice Small ONNX (sherpa-onnx)，情绪检测
+LLM：  DeepSeek API (deepseek-v4-flash)
 ```
 
 ---
 
 ## 快速开始
 
-### 1. 克隆项目
+### 前提条件
+
+- Python 3.12+
+- Node.js 22+
+- DeepSeek API Key（注册即送免费额度）
+
+### 1. 克隆并配置
 
 ```bash
 git clone https://github.com/你的用户名/ruoxue-agent.git
 cd ruoxue-agent
-```
-
-### 2. 配置环境变量
-
-```bash
 cp .env.example .env
-# 编辑 .env，填入 DeepSeek API Key
+# 编辑 .env，填入 DEEPSEEK_API_KEY
 ```
 
-### 3. 安装后端依赖
+### 2. 安装后端
 
 ```bash
 cd backend
 python -m venv venv
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
+# Windows: venv\Scripts\activate    macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. 下载模型（可选）
-
-- **ASR 模型**：下载 [SenseVoice Small ONNX](https://github.com/k2-fsa/sherpa-onnx/releases) 放到 `model_assets/asr/sensevoice-small-int8/`
-- **Live2D 模型**：下载 mao_pro 模型放到 `model_assets/live2d/mao_zh_Hans/`
-
-> 没有模型也能跑——文字聊天和 Agent 功能不受影响。
-
-### 5. 安装前端依赖
+### 3. 安装前端
 
 ```bash
 cd ../frontend
 npm install
 ```
 
-### 6. 启动
+### 4. 启动
 
 ```bash
-# 终端 1：从项目根目录启动后端
-cd ruoxue-agent
+# 终端 1：后端（从项目根目录启动）
 python -m backend.main          # → http://localhost:8000
 
-# 终端 2：启动前端
-cd frontend
-npm run dev                     # → http://localhost:5173
+# 终端 2：前端
+cd frontend && npm run dev      # → http://localhost:5173
 ```
 
-打开浏览器访问 `http://localhost:5173`
+### 5. 可选：下载离线模型
+
+| 模型 | 用途 | 说明 |
+|------|------|------|
+| SenseVoice Small | 离线语音识别 | 不装也能用（按钮隐藏） |
+| Live2D mao_pro | 数字人模型 | 不装只显示文字聊天 |
+
+> 两个模型都不装也能跑——文字聊天 + Agent + TTS 功能完整可用。
 
 ---
 
-## 🐳 Docker 快速启动（推荐）
-
-无需安装 Python/Node，一键启动：
+## 🐳 Docker 启动
 
 ```bash
-# 1. 克隆项目
-git clone https://github.com/你的用户名/ruoxue-agent.git
-cd ruoxue-agent
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
-
-# 3. 一键启动
-docker compose up -d --build
-```
-
-打开浏览器访问 `http://localhost`（前端:80 → 后端:8000）
-
-```bash
-# 查看日志
-docker compose logs -f
-
-# 停止
-docker compose down
+cp .env.example .env && vim .env     # 填入 DEEPSEEK_API_KEY
+docker compose up -d --build         # → http://localhost
+docker compose logs -f               # 查看日志
+docker compose down                  # 停止
 ```
 
 ---
@@ -152,28 +107,58 @@ docker compose down
 
 ```
 ruoxue-agent/
+├── CLAUDE.md                    ← AI 协作指南 + 硬约束 (自动生效)
+├── skills/                      ← 11 个可复用 Skill (skills-kit 部署)
+│   └── CORE_RULES.md
+├── skills-kit/                  ← Skill 套装源码 + 一键安装脚本
+│   ├── init.sh / init.bat
+│   └── skills/
 ├── backend/
-│   ├── main.py                  FastAPI 入口
-│   ├── routes.py                API 路由（chat / asr / upload / health）
-│   ├── config.py                配置管理
+│   ├── main.py                  FastAPI 入口 + CORS + lifespan
+│   ├── routes.py                API 路由 (chat SSE / asr / upload / health)
+│   ├── config.py                环境变量配置
 │   ├── agent/
-│   │   ├── agent_graph.py       LangGraph Agent 图
-│   │   ├── tools.py             5 个工具定义
-│   │   ├── memory.py            短期记忆
-│   │   ├── chroma_memory.py     Chroma 长期记忆
-│   │   ├── rag_service.py       FAISS 知识库
-│   │   └── emotional_agent.py   [Legacy] 情绪系统常量
-│   ├── tts/                     Edge TTS + G2P + Viseme
-│   └── asr/                     SenseVoice 语音识别
+│   │   ├── agent_graph.py       LangGraph StateGraph + 三层 prompt + skill 注入
+│   │   ├── skill_loader.py      关键词匹配 → 动态 skill 加载
+│   │   ├── tools.py             5 个工具 (search/read/weather/list/knowledge)
+│   │   ├── memory.py            短期记忆 (dict 滑动窗口)
+│   │   ├── chroma_memory.py     Chroma 长期记忆 (语义检索)
+│   │   ├── rag_service.py       FAISS 知识库 (文档索引 + 搜索)
+│   │   └── emotional_agent.py   [Legacy] EMOTION_SYSTEM_PROMPT 常量
+│   ├── tts/
+│   │   ├── tts_service.py       Edge TTS (主) + pyttsx3 (兜底)
+│   │   ├── g2p_service.py       中文 G2P (pypinyin 声韵母拆分)
+│   │   └── viseme_mapper.py     韵母→5 参数口型序列 (多帧机制)
+│   └── asr/
+│       └── asr_service.py       SenseVoice ONNX 离线语音识别
 ├── frontend/
 │   └── src/
-│       ├── components/          ChatPanel / Live2DCanvas / VoiceButton
+│       ├── components/          ChatPanel / ChatBubble / Live2DCanvas / VoiceButton
 │       ├── hooks/               useChat / useLive2D / useVoice
-│       ├── live2d/              Cubism SDK 封装 (Emotion/LipSync/Motion)
-│       └── audio/               AudioManager / MicRecorder
-├── docs/                        项目文档 + PRD + 阶段总结
+│       ├── live2d/              Cubism SDK 封装 (Emotion / LipSync / Motion)
+│       ├── audio/               AudioManager / MicRecorder
+│       └── chat/                ChatClient (SSE) / ASRClient
+├── scripts/                     CI 辅助脚本 + 技能硬约束检查
+├── docs/                        项目文档 + PRD + 阶段总结 + 经验记录
 ├── .env.example                 环境变量模板
-└── README.md
+└── docker-compose.yml
+```
+
+---
+
+## Skill 系统
+
+项目内置 **11 个可复用 Skill**（从 `skills-kit/` 一键安装），分层触发：
+
+| 层级 | 触发方式 | 内容 |
+|------|----------|------|
+| 硬约束 | `CLAUDE.md` 自动加载，100% 生效 | 9 条铁律（先验证再过、改前读文件、批量后校验...） |
+| 关键词匹配 | `agent_graph.py` + `skill_loader.py` 自动匹配用户意图 | 11 个场景 skill（TDD、Bug诊断、模块设计...） |
+| 机器校验 | pre-commit / pre-push hook | lint / test / build |
+
+```bash
+# 安装到任意项目
+cd skills-kit && bash init.sh /path/to/any-project
 ```
 
 ---
@@ -182,12 +167,18 @@ ruoxue-agent/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DEEPSEEK_API_KEY` | — | **必填**，DeepSeek API Key |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名 |
+| `DEEPSEEK_API_KEY` | — | **必填** |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | LLM 模型 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 地址 |
+| `LLM_TEMPERATURE` | `0.7` | 生成温度 |
+| `LLM_MAX_TOKENS` | `8192` | 最大 token |
+| `RUOXUE_HOST` | `0.0.0.0` | 绑定地址 |
 | `RUOXUE_PORT` | `8000` | 后端端口 |
-| `MAX_HISTORY_TURNS` | `20` | 对话历史轮数 |
-| `TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | Edge TTS 语音 |
-| `WEATHER_PROXY` | — | 天气查询代理（国内用户建议设置） |
+| `MAX_HISTORY_TURNS` | `20` | 对话轮数窗口 |
+| `TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | Edge TTS 语音 (29 个可选) |
+| `TTS_PROXY` | — | Edge TTS HTTP 代理 |
+| `TAVILY_API_KEY` | — | Tavily 搜索 API Key（无 Key 则搜索不可用） |
+| `ASR_MODEL_DIR` | `model_assets/asr/...` | SenseVoice 模型路径 |
 
 ---
 

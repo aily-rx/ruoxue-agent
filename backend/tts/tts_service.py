@@ -1,94 +1,185 @@
-"""Offline TTS synthesis via pyttsx3 (Windows SAPI5).
+"""TTS synthesis — Edge TTS (neural, online) + pyttsx3 (SAPI5, offline fallback).
 
-Uses the system's built-in Chinese TTS voice (Microsoft Huihui).
-Fully offline — zero network, zero proxy, zero API key.
+Primary: Microsoft Edge TTS — 30+ neural Chinese voices, near-human quality.
+Fallback: pyttsx3 / Windows SAPI5 — offline, lower quality, auto-selected
+          when Edge TTS is unreachable (network down / firewall).
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import os
 import tempfile
+from io import BytesIO
 
-# Lazy-initialized engine singleton
-_engine = None
-_load_error: str | None = None
+import edge_tts
+from backend.config import TTS_PROXY, TTS_VOICE
+
+# ── Edge TTS (primary) ──────────────────────────────────────────────
 
 
-def _get_engine():
-    """Create and configure pyttsx3 engine (once, with Chinese voice)."""
-    global _engine, _load_error
-    if _engine is not None:
-        return _engine
-    if _load_error is not None:
-        raise RuntimeError(_load_error)
+async def _synthesize_edge(text: str, voice: str = TTS_VOICE) -> bytes:
+    """Synthesize via Edge TTS → MP3 bytes."""
+    communicate = edge_tts.Communicate(text, voice, proxy=TTS_PROXY)
+    buffer = BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            buffer.write(chunk["data"])
+    if buffer.tell() == 0:
+        raise RuntimeError("Edge TTS returned no audio data")
+    return buffer.getvalue()
 
+
+async def _synthesize_edge_with_boundaries(
+    text: str,
+    voice: str = TTS_VOICE,
+) -> tuple[bytes, list[dict]]:
+    """Synthesize via Edge TTS → (MP3 bytes, word_boundaries).
+
+    Word boundaries provide per-character duration data for precise
+    viseme lip-sync timing.
+    """
+    communicate = edge_tts.Communicate(
+        text,
+        voice,
+        proxy=TTS_PROXY,
+        boundary="WordBoundary",
+    )
+    buffer = BytesIO()
+    word_boundaries: list[dict] = []
+
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            buffer.write(chunk["data"])
+        elif chunk["type"] == "WordBoundary":
+            word_boundaries.append(
+                {
+                    "offset": chunk["offset"],  # 100ns units
+                    "duration": chunk["duration"],  # 100ns units
+                    "text": chunk["text"],
+                }
+            )
+
+    if buffer.tell() == 0:
+        raise RuntimeError("Edge TTS returned no audio data")
+    return buffer.getvalue(), word_boundaries
+
+
+# ── pyttsx3 / SAPI5 (offline fallback) ──────────────────────────────
+
+_MAX_TTS_SECONDS = 30  # safety timeout for offline engine
+
+
+def _com_init():
+    """Initialize COM on current thread (required by SAPI5)."""
+    try:
+        import pythoncom
+
+        pythoncom.CoInitialize()
+    except ImportError:
+        pass
+
+
+def _com_uninit():
+    try:
+        import pythoncom
+
+        pythoncom.CoUninitialize()
+    except ImportError:
+        pass
+
+
+def _synthesize_sapi5(text: str) -> bytes:
+    """Blocking SAPI5 synthesis via pyttsx3 → WAV bytes."""
+    _com_init()
     try:
         import pyttsx3
 
         e = pyttsx3.init()
-        # Auto-select Chinese voice
         for voice in e.getProperty("voices"):
             if any(lang.startswith("zh") for lang in (voice.languages or [])):
                 e.setProperty("voice", voice.id)
-                print(f"[TTS] Using voice: {voice.name}")
                 break
-        else:
-            print("[TTS] No Chinese voice found, using default")
-        e.setProperty("rate", 200)  # speaking speed
+        e.setProperty("rate", 200)
         e.setProperty("volume", 1.0)
-        _engine = e
-        return e
-    except Exception as exc:
-        _load_error = str(exc)
-        raise RuntimeError(f"pyttsx3 init failed: {exc}") from exc
 
-
-def _synthesize_sync(text: str) -> bytes:
-    """Blocking synthesis — called via thread pool to avoid blocking event loop."""
-    engine = _get_engine()
-    # pyttsx3 save_to_file writes to a file path; use temp file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        temp_path = f.name
-    try:
-        engine.save_to_file(text, temp_path)
-        engine.runAndWait()
-        with open(temp_path, "rb") as f:
-            return f.read()
-    finally:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            temp_path = f.name
         try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
+            e.save_to_file(text, temp_path)
+            e.runAndWait()
+            with open(temp_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+    finally:
+        _com_uninit()
 
 
-async def synthesize(text: str) -> bytes:
-    """Synthesize Chinese text into WAV audio bytes.
-
-    Args:
-        text: Chinese text to synthesize.
-
-    Returns:
-        WAV audio bytes (system default sample rate, mono).
-    """
+async def _synthesize_sapi5_async(text: str) -> bytes:
+    """SAPI5 synthesis with timeout protection."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _synthesize_sync, text)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(executor, _synthesize_sapi5, text),
+            timeout=_MAX_TTS_SECONDS,
+        )
+    except TimeoutError:
+        raise TimeoutError(f"Offline TTS timed out after {_MAX_TTS_SECONDS}s") from None
+    finally:
+        executor.shutdown(wait=False)
+
+
+# ── Public API ──────────────────────────────────────────────────────
+
+
+async def synthesize(
+    text: str,
+    voice: str = TTS_VOICE,
+    proxy: str | None = None,
+) -> bytes:
+    """Synthesize text → audio bytes (MP3 from Edge TTS).
+
+    Automatically falls back to pyttsx3 SAPI5 if Edge TTS is unreachable.
+    """
+    try:
+        audio = await _synthesize_edge(text, voice=voice)
+        print(f"[TTS] Edge TTS OK, {len(audio)} bytes")
+        return audio
+    except Exception as edge_err:
+        print(f"[TTS] Edge TTS failed ({edge_err}), falling back to offline SAPI5")
+        audio = await _synthesize_sapi5_async(text)
+        print(f"[TTS] Offline SAPI5 OK, {len(audio)} bytes")
+        return audio
 
 
 async def synthesize_with_word_boundary(
     text: str,
-    voice: str = "",
+    voice: str = TTS_VOICE,
     proxy: str | None = None,
 ) -> tuple[bytes, list[dict]]:
-    """Synthesize with word boundaries (not supported by pyttsx3/SAPI5).
+    """Synthesize text → (audio_bytes, word_boundaries).
 
-    pyttsx3 does not provide word-level timing. This function returns
-    empty boundaries, so the viseme pipeline falls back to fixed-timing
-    estimation (ms_per_char). The voice and proxy parameters are
-    accepted for API compatibility but ignored.
+    Returns word-level timing data from Edge TTS for precise viseme sync.
+    Falls back to pyttsx3 (empty boundaries) when offline.
 
-    Returns:
-        Tuple of (wav_bytes, []) — always empty boundaries.
+    Each boundary dict: {"offset": int, "duration": int, "text": str}
+    offset/duration are in 100-nanosecond units (Edge TTS convention).
     """
-    audio = await synthesize(text)
-    return audio, []
+    try:
+        audio, boundaries = await _synthesize_edge_with_boundaries(
+            text,
+            voice=voice,
+        )
+        print(f"[TTS] Edge TTS OK, {len(audio)} bytes, {len(boundaries)} boundaries")
+        return audio, boundaries
+    except Exception as edge_err:
+        print(f"[TTS] Edge TTS failed ({edge_err}), falling back to offline SAPI5")
+        audio = await _synthesize_sapi5_async(text)
+        print(f"[TTS] Offline SAPI5 OK, {len(audio)} bytes, no boundaries")
+        return audio, []

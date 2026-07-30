@@ -130,8 +130,6 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
       // Audio arrived without visemes — play it (reset handled by audio onended)
       playAudio(p.base64);
     }
-    // If audio was already flushed (with visemes), reset is already scheduled by audio onended.
-    // If no audio at all, skip reset — next message will trigger thinking expression.
     pendingRef.current = {};
   }, [playAudio]);
 

@@ -1,0 +1,14 @@
+name: implement
+display_name: "实现"
+type: model-invoked
+trigger_keywords:
+  - "按依赖方向"
+  - "从下往上实现"
+  - "实现功能"
+  - "开始写代码"
+  - "按方案做"
+  - "按 spec"
+  - "写代码实现"
+  - "开发实现"
+tools_required: []
+priority: 5

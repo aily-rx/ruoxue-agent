@@ -1,0 +1,17 @@
+name: handoff
+display_name: "会话交接"
+type: model-invoked
+trigger_keywords:
+  - "总结一下"
+  - "对话总结"
+  - "总结存档"
+  - "交接"
+  - "下次继续"
+  - "handoff"
+  - "记录一下"
+  - "写到文档"
+  - "存档"
+  - "总结对话"
+  - "总结"
+tools_required: []
+priority: 4

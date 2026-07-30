@@ -11,7 +11,6 @@ State uses a four-layer prompt: system_prompt (static persona)
 
 from __future__ import annotations
 
-import sys
 from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +22,11 @@ from backend.agent.emotional_agent import (
     EMOTION_TAG_RE,
     SSEEvent,
 )
+
+# ---------------------------------------------------------------------------
+# DeepSeek Skills — dynamic prompt injection
+# ---------------------------------------------------------------------------
+from backend.agent.skill_loader import SkillLoader
 from backend.agent.tools import AGENT_TOOLS
 from backend.config import (
     DEEPSEEK_API_KEY,
@@ -44,17 +48,9 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
-# ---------------------------------------------------------------------------
-# DeepSeek Skills — dynamic prompt injection
-# ---------------------------------------------------------------------------
-
-_deepseek_skills_path = str(Path(__file__).resolve().parent.parent / "deepseek-skills")
-if _deepseek_skills_path not in sys.path:
-    sys.path.insert(0, _deepseek_skills_path)
-
-from skill_loader import SkillLoader  # noqa: E402
-
-_skill_loader = SkillLoader(str(Path(__file__).resolve().parent.parent / "deepseek-skills" / "skills"))
+# Skills directory lives at project root (deployed by skills-kit/init.sh)
+_skills_dir = str(Path(__file__).resolve().parent.parent.parent / "skills")
+_skill_loader = SkillLoader(_skills_dir)
 
 # ---------------------------------------------------------------------------
 # LangGraph State

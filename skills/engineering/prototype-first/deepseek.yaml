@@ -1,0 +1,26 @@
+name: prototype-first
+display_name: "原型先行"
+type: model-invoked
+trigger_keywords:
+  - "页面布局"
+  - "新页面"
+  - "页面设计"
+  - "UI设计"
+  - "布局设计"
+  - "画原型"
+  - "界面布局"
+  - "前端页面"
+  - "组件树"
+  - "组件设计"
+  - "响应式布局"
+  - "移动端适配"
+  - "前后端联调"
+  - "数据协议"
+  - "UI界面"
+  - "交互设计"
+  - "页面状态"
+  - "设计页面"
+  - "页面"
+  - "布局图"
+tools_required: []
+priority: 7

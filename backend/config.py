@@ -34,8 +34,13 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 # --- Conversation ---
 MAX_HISTORY_TURNS = int(os.getenv("MAX_HISTORY_TURNS", "20"))
 
-# --- TTS (Phase 2) — offline via pyttsx3 (Windows SAPI5) ---
-# Uses system TTS voice (Microsoft Huihui). Zero network, zero proxy.
+# --- TTS (Phase 2) — Edge TTS (neural, online) + pyttsx3 (SAPI5, offline fallback) ---
+# Edge TTS is the primary engine with 30+ high-quality neural Chinese voices.
+# Falls back to pyttsx3 on network error so offline usage still works.
+TTS_VOICE = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")  # 活泼女声，接近真人
+# Other great voices: zh-CN-XiaoyiNeural (温柔), zh-CN-YunxiNeural (温暖男声),
+# zh-CN-XiaochenNeural (冷静女声), zh-CN-YunjianNeural (成熟男声)
+TTS_PROXY = os.getenv("TTS_PROXY", "") or None  # optional HTTP proxy for Edge TTS
 
 # --- Agent Tools ---
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")

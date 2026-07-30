@@ -91,27 +91,122 @@ def _strip_symbols(text: str) -> str:
     return _SYMBOL_RE.sub("", text).strip()
 
 
+def _boundaries_to_char_durations(
+    word_boundaries: list[dict],
+) -> list[float]:
+    """Convert Edge TTS word boundaries to per-character durations in ms.
+
+    Uses len(wb_text) — ALL characters in the boundary word (including
+    punctuation) — to distribute duration evenly. This matches the total
+    character count of tts_text because Edge TTS processes the exact same
+    text and emits one boundary per word.
+
+    Args:
+        word_boundaries: List of {"offset": int, "duration": int, "text": str}
+                         from Edge TTS, offset/duration in 100ns units.
+
+    Returns:
+        List of millisecond durations, one per character in tts_text.
+    """
+    if not word_boundaries:
+        return []
+    char_durations: list[float] = []
+    for wb in word_boundaries:
+        wb_text = wb.get("text", "")
+        wb_duration_ms = wb["duration"] / 10000.0  # 100ns → ms
+        char_count = len(wb_text)
+        if char_count > 0:
+            dur_per_char = wb_duration_ms / char_count
+            for _ in range(char_count):
+                char_durations.append(dur_per_char)
+    return char_durations
+
+
+def _mp3_duration(data: bytes) -> int:
+    """Calculate MP3 audio duration in milliseconds from frame count.
+
+    Scans for MPEG audio frame sync markers (0xFFE0) and multiplies
+    by 1152 samples/frame ÷ 44100 Hz. Falls back to byte-size estimate.
+    """
+    frame_count = 0
+    i = 0
+    n = len(data)
+    while i < n - 1:
+        if data[i] == 0xFF and (data[i + 1] & 0xE0) == 0xE0:
+            frame_count += 1
+            i += 200  # skip ahead (typical frame ~417 bytes, 200 is safe lower bound)
+        else:
+            i += 1
+    if frame_count == 0:
+        return int(len(data) * 8 * 1000 / 48000)  # fallback: 48 kbps
+    return int(frame_count * 1152 * 1000 / 44100)
+
+
 def _wav_duration(data: bytes) -> int:
     """Calculate WAV audio duration in milliseconds from header.
 
-    Falls back to estimating from byte size if header is invalid.
+    Handles standard PCM WAV as well as pyttsx3/SAPI5 output which may
+    have non-standard chunk ordering. Falls back to estimating from byte
+    size and a set of common sample rates if header is invalid.
     """
     import struct
 
     try:
-        # WAV header: RIFF ... fmt  -> sample_rate at byte 24, byte_rate at byte 28
         if len(data) >= 44 and data[:4] == b"RIFF":
-            sample_rate: int = struct.unpack_from("<I", data, 24)[0]
-            data_size: int = struct.unpack_from("<I", data, 40)[0]
-            channels: int = struct.unpack_from("<H", data, 22)[0]
-            bits_per_sample: int = struct.unpack_from("<H", data, 34)[0]
-            bytes_per_second = sample_rate * channels * (bits_per_sample // 8)
-            if bytes_per_second > 0:
-                return int(data_size * 1000 / bytes_per_second)
+            # Parse fmt  chunk to find audio format details
+            # Standard WAV: "fmt " at offset 12, but pyttsx3 may have
+            # extra chunks before fmt. Search for "fmt " chunk.
+            offset = 12
+            while 0 < offset < len(data) - 8:
+                chunk_id = data[offset : offset + 4]
+                chunk_size: int = struct.unpack_from("<I", data, offset + 4)[0]
+                if chunk_size <= 0 or offset + 8 + chunk_size > len(data):
+                    break  # malformed chunk
+                if chunk_id == b"fmt ":
+                    fmt_offset = offset + 8
+                    channels: int = struct.unpack_from("<H", data, fmt_offset + 2)[0]
+                    sample_rate: int = struct.unpack_from("<I", data, fmt_offset + 4)[0]
+                    bits_per_sample: int = struct.unpack_from("<H", data, fmt_offset + 14)[0]
+                    # Find "data" chunk to get actual audio data size
+                    data_offset = offset + 8 + chunk_size
+                    while data_offset < len(data) - 8:
+                        dchunk_id = data[data_offset : data_offset + 4]
+                        dchunk_size: int = struct.unpack_from("<I", data, data_offset + 4)[0]
+                        if dchunk_size <= 0 or data_offset + 8 + dchunk_size > len(data):
+                            break  # malformed chunk
+                        if dchunk_id == b"data":
+                            data_size = dchunk_size
+                            bytes_per_second = sample_rate * channels * (bits_per_sample // 8)
+                            if bytes_per_second > 0:
+                                return int(data_size * 1000 / bytes_per_second)
+                            break
+                        data_offset += 8 + dchunk_size
+                    break
+                offset += 8 + chunk_size
+
+            # Fallback: try standard offsets (works for simple PCM WAV)
+            if len(data) >= 44:
+                sample_rate2: int = struct.unpack_from("<I", data, 24)[0]
+                data_size2: int = struct.unpack_from("<I", data, 40)[0]
+                channels2: int = struct.unpack_from("<H", data, 22)[0]
+                bits2: int = struct.unpack_from("<H", data, 34)[0]
+                bps = sample_rate2 * channels2 * (bits2 // 8)
+                if bps > 0:
+                    return int(data_size2 * 1000 / bps)
     except Exception:
         pass
-    # Fallback: estimate from raw size (24kHz 16-bit mono = 48000 bytes/s)
-    return int(len(data) * 1000 / 48000)
+
+    # Fallback: estimate from raw size against common sample rates.
+    # pyttsx3/SAPI5 typically outputs 16-bit mono at 16kHz or 22.05kHz.
+    # Try each rate and pick the most plausible duration (< 300s for TTS).
+    audio_bytes = len(data) - 44 if len(data) >= 44 else len(data)
+    if audio_bytes <= 0:
+        return 0
+    for rate in (22050, 16000, 24000, 44100, 48000, 8000):
+        duration = int(audio_bytes * 1000 / (rate * 2))  # 16-bit mono = 2 bytes/sample
+        if 100 < duration < 300_000:  # between 0.1s and 300s — plausible for TTS
+            return duration
+    return int(audio_bytes * 1000 / 32000)  # last resort
 
 
 # --- Request/Response schemas ---
@@ -187,25 +282,62 @@ async def chat(req: ChatRequest):
                     if not tts_text:
                         tts_text = full_reply  # fallback if everything was stripped
 
-                    # Synthesize with ChatTTS (offline, no proxy needed)
-                    # ChatTTS does not provide word boundaries — viseme uses
-                    # fixed per-character timing estimation (30ms/char)
-                    wav_bytes, _word_boundaries = await synthesize_with_word_boundary(tts_text)
-                    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+                    # Synthesize: Edge TTS (neural, online) → pyttsx3 (offline fallback).
+                    # Edge TTS returns (MP3 bytes, word_boundaries), pyttsx3 returns
+                    # (WAV bytes, []) — we detect format from boundary presence.
+                    audio_bytes, word_boundaries = await synthesize_with_word_boundary(tts_text)
+                    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
-                    # Calculate audio duration from WAV header
-                    audio_duration_ms = _wav_duration(wav_bytes)
-                    print(f"[TTS] duration={audio_duration_ms}ms, text_len={len(tts_text)}")
+                    has_boundaries = len(word_boundaries) > 0
+                    audio_fmt = "mp3" if has_boundaries else "wav"
+
+                    # Calculate precise audio duration.
+                    if has_boundaries:
+                        # Edge TTS MP3: use boundaries for word-level precision,
+                        # fall back to MP3 frame scanning (more accurate than byte-size estimate).
+                        last = word_boundaries[-1]
+                        boundary_ms = int((last["offset"] + last["duration"]) / 10000)
+                        mp3_frame_ms = _mp3_duration(audio_bytes)
+                        # Take the larger of the two (boundaries can miss trailing silence)
+                        audio_duration_ms = max(boundary_ms, mp3_frame_ms)
+                    else:
+                        # pyttsx3 WAV: parse from header
+                        audio_duration_ms = _wav_duration(audio_bytes)
+
+                    # Build per-character durations from Edge TTS word boundaries.
+                    # Uses len(wb_text) for ALL characters in the boundary word (including
+                    # punctuation) — this matches tts_text character count exactly because
+                    # Edge TTS processes the same text.
+                    char_durations: list[float] | None = None
+                    if has_boundaries:
+                        char_durations = _boundaries_to_char_durations(word_boundaries)
+
+                    # Fallback ms_per_char for pyttsx3 (no boundaries)
+                    cjk_count = sum(1 for ch in tts_text if "一" <= ch <= "鿿")
+                    non_cjk_count = len(tts_text) - cjk_count
+                    total_speak_ms = audio_duration_ms - non_cjk_count * 80
+                    ms_per_char = (
+                        max(total_speak_ms / cjk_count, 20.0) if (cjk_count > 0 and total_speak_ms > 0) else 30.0
+                    )
+
+                    print(
+                        f"[TTS] format={audio_fmt}, duration={audio_duration_ms}ms, "
+                        f"bytes={len(audio_bytes)}, text_len={len(tts_text)}, "
+                        f"boundaries={len(word_boundaries)}, "
+                        f"char_dur_len={len(char_durations) if char_durations else 0}, "
+                        f"ms_per_char={ms_per_char:.1f}"
+                    )
 
                     yield "event: audio\n"
-                    yield f"data: {json.dumps({'base64': audio_b64, 'format': 'wav', 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
+                    yield f"data: {json.dumps({'base64': audio_b64, 'format': audio_fmt, 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
                     yield "\n"
 
-                    # Generate viseme sequence with fixed per-character timing
+                    # Generate viseme sequence with word-boundary timing when available,
+                    # otherwise uniform per-character distribution.
                     viseme_seq = text_to_viseme_sequence(
                         tts_text,
-                        ms_per_char=30.0,
-                        char_durations=None,
+                        ms_per_char=ms_per_char,
+                        char_durations=char_durations,
                     )
                     if viseme_seq and audio_duration_ms > 0:
                         raw_last_ms = viseme_seq[-1]["time_ms"]

@@ -8,6 +8,7 @@ httpx>=0.28
 python-multipart>=0.0.9
 python-dotenv>=1.0
 pyttsx3>=2.90
+edge-tts>=6.1
 tavily-python>=0.7
 sherpa-onnx>=1.10
 pypinyin>=0.50
