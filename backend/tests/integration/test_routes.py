@@ -48,6 +48,8 @@ class TestChatEndpoint:
         )
         # Accept 200 (success) or 500 (LLM API key missing) as both are valid
         assert response.status_code in (200, 500)
+        # 每个请求必须有 X-Request-Id（tracing 贯穿日志的依据）
+        assert response.headers.get("x-request-id")
 
     async def test_rejects_empty_text(self, client):
         """Should reject empty message with 422."""

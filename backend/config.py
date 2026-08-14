@@ -54,15 +54,56 @@ ASR_MODEL_DIR = os.getenv("ASR_MODEL_DIR", _ASR_DEFAULT)
 
 
 class JSONFormatter(logging.Formatter):
-    """Outputs log records as JSON lines for machine parsing."""
+    """Outputs log records as JSON lines for machine parsing.
+
+    Standard fields (timestamp/level/logger/message) are always present.
+    Custom `extra` kwargs on the log call (e.g. request_id, duration_ms)
+    are appended as top-level JSON fields, so tracing fields survive
+    into Loki/ELK-style indexers.
+    """
+
+    _STD_ATTRS = frozenset(
+        {
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "taskName",
+        }
+    )
 
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
+        payload: dict = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # 附加 extra 自定义字段（request_id / duration_ms / skill 等）
+        for key, value in record.__dict__.items():
+            if key in payload or key in self._STD_ATTRS or key.startswith("_"):
+                continue
+            try:
+                json.dumps(value)
+            except (TypeError, ValueError):
+                value = str(value)
+            payload[key] = value
         if record.exc_info and record.exc_info[1]:
             payload["exception"] = str(record.exc_info[1])
         return json.dumps(payload, ensure_ascii=False)

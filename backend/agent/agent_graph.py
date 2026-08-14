@@ -11,6 +11,9 @@ State uses a four-layer prompt: system_prompt (static persona)
 
 from __future__ import annotations
 
+import logging
+import time
+import uuid
 from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -46,8 +49,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential
 from typing_extensions import TypedDict
+
+# 全链路结构化日志: 统一 JSON 输出(JSONFormatter), 每条带 request_id 可追溯
+_logger = logging.getLogger("agent.agent_graph")
 
 # Skills directory lives at project root (deployed by skills-kit/init.sh)
 _skills_dir = str(Path(__file__).resolve().parent.parent.parent / "skills")
@@ -98,10 +104,22 @@ def _build_llm() -> ChatOpenAI:
     )
 
 
+def _log_retry_sleep(retry_state: RetryCallState) -> None:
+    """LLM 调用重试时打 WARNING 日志（含失败原因, 便于 tracing 定位抖动）。"""
+    _logger.warning(
+        "llm call retry",
+        extra={
+            "attempt": retry_state.attempt_number,
+            "error": str(retry_state.outcome.exception()),
+        },
+    )
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, max=10),
     reraise=True,
+    before_sleep=_log_retry_sleep,
 )
 async def _ainvoke_with_retry(llm: Any, messages: list[BaseMessage]) -> BaseMessage:
     """LLM 调用带指数退避重试（网络抖动/限流自动恢复, 3 次后原样抛出）。
@@ -181,6 +199,7 @@ agent_graph = _workflow.compile()
 async def run_agent_stream(
     user_text: str,
     history: list[dict] | None = None,
+    request_id: str | None = None,
 ) -> AsyncGenerator[SSEEvent, None]:
     """Stream the agent's reply token-by-token via SSE.
 
@@ -189,7 +208,17 @@ async def run_agent_stream(
       Layer 2 — runtime_context  (current date, future: user profile)
       Layer 3 — memory_context   (Chroma long-term memory)
       Layer 4 — skill_context    (keyword-matched from deepseek-skills/)
+
+    Every stage logs a JSON line with the same request_id, so a full
+    request's trace can be reassembled by filtering on that field.
     """
+    rid = request_id or uuid.uuid4().hex[:12]
+    start_ms = time.monotonic()
+    _logger.info(
+        "agent request start",
+        extra={"request_id": rid, "user_text": user_text[:50]},
+    )
+
     # Layer 1: static persona + core behavioral rules (from skill system)
     system_prompt = EMOTION_SYSTEM_PROMPT + "\n\n" + _skill_loader.core_rules()
 
@@ -203,7 +232,16 @@ async def run_agent_stream(
         "\n\n你拥有长期记忆。以下是与当前话题相关的历史对话，"
         "请自然地引用它们（如果用户问起相关话题，可以说「之前我们聊过」）：\n\n"
     )
+    _stage_ms = time.monotonic()
     chroma_hits = chroma_memory.retrieve_context(user_text)
+    _logger.info(
+        "chroma retrieve",
+        extra={
+            "request_id": rid,
+            "duration_ms": round((time.monotonic() - _stage_ms) * 1000, 1),
+            "hit_chars": len(chroma_hits),
+        },
+    )
     if chroma_hits:
         memory_context += chroma_hits
         print(f"[Chroma] retrieved context ({len(chroma_hits)} chars)")
@@ -213,6 +251,7 @@ async def run_agent_stream(
     # Layer 4: dynamic skill context (keyword-matched from deepseek-skills/)
     skill_context = ""
     skill_name = _skill_loader.match(user_text)
+    _logger.info("skill match", extra={"request_id": rid, "skill": skill_name or "none"})
     if skill_name:
         skill_content = _skill_loader.load(skill_name)
         if skill_content:
@@ -311,4 +350,13 @@ async def run_agent_stream(
             # 工具循环被强制终止且没有任何回复 → 明确告知用户而不是沉默
             yield SSEEvent(event="token", data={"text": _TOOL_LIMIT_HINT})
 
+    _logger.info(
+        "agent request done",
+        extra={
+            "request_id": rid,
+            "duration_ms": round((time.monotonic() - start_ms) * 1000, 1),
+            "tool_calls": tool_call_count,
+            "reply_chars": len(full_text),
+        },
+    )
     yield SSEEvent(event="done", data={})

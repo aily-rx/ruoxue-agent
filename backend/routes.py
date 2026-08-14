@@ -236,14 +236,18 @@ async def chat(req: ChatRequest):
 
     Returns text/event-stream with events:
         emotion, token*, audio, viseme, done
+
+    Every request gets a request_id (also returned as X-Request-Id header)
+    that threads through all agent-stage JSON logs for tracing.
     """
+    request_id = uuid.uuid4().hex[:12]
     history = memory.get_history(req.session_id)
 
     async def event_stream():
         full_reply = ""
         has_error = False
         try:
-            async for sse_event in run_agent_stream(req.text, history):
+            async for sse_event in run_agent_stream(req.text, history, request_id=request_id):
                 event = sse_event.event
                 data = sse_event.data
 
@@ -379,6 +383,7 @@ async def chat(req: ChatRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "X-Request-Id": request_id,
         },
     )
 
