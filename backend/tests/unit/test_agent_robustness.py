@@ -62,7 +62,9 @@ class FakeGraph:
     def __init__(self, items: list[object]) -> None:
         self._items = items
 
-    async def astream(self, inputs: dict, stream_mode: str = "messages") -> AsyncGenerator[object, None]:
+    async def astream(
+        self, inputs: dict, config: dict | None = None, stream_mode: str = "messages"
+    ) -> AsyncGenerator[object, None]:
         for item in self._items:
             yield item
 

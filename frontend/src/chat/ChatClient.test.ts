@@ -103,6 +103,23 @@ describe("streamChat SSE 解析", () => {
     expect(tokens).toEqual(["正常"]);
   });
 
+  it("解析 tool_request 事件（HITL 工具确认）", async () => {
+    const body =
+      'event: tool_request\ndata: {"request_id":"req-abc","tool_calls":[{"name":"search_web","args":{"query":"x"}}],"timeout_s":60}\n\n' +
+      "event: done\ndata: {}\n\n";
+    stubFetch(body);
+
+    const requests: Array<{ requestId: string; toolCalls: Array<{ name: string }>; timeoutS?: number }> = [];
+    await streamChat("hi", "s1", {
+      onToolRequest: (req) => requests.push(req),
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].requestId).toBe("req-abc");
+    expect(requests[0].toolCalls[0].name).toBe("search_web");
+    expect(requests[0].timeoutS).toBe(60);
+  });
+
   it("HTTP 非 200 时抛出错误", async () => {
     vi.stubGlobal(
       "fetch",

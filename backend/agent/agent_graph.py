@@ -11,6 +11,7 @@ State uses a four-layer prompt: system_prompt (static persona)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -37,6 +38,8 @@ from backend.config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
+    HITL_CONFIRM_TIMEOUT,
+    HITL_ENABLED,
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
 )
@@ -46,11 +49,14 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from langgraph.types import Command, interrupt
 from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential
 from typing_extensions import TypedDict
 
@@ -212,13 +218,64 @@ def should_continue(state: AgentState) -> str:
     return END
 
 
+class ConfirmingToolNode:
+    """工具节点: HITL 开启时, 执行工具前用 interrupt() 挂起等用户确认。
+
+    HITL 关闭时行为与 langgraph.prebuilt.ToolNode 完全一致。
+    interrupt 的 payload 由 run_agent_stream 转成 SSE tool_request 事件,
+    用户确认后以 Command(resume=bool) 恢复:
+      - 允许 → 正常执行工具
+      - 拒绝 → 不执行, 注入一条"用户取消"的 ToolMessage 让 LLM 转述
+    """
+
+    def __init__(self, tools: list) -> None:
+        self._tool_node = ToolNode(tools)
+
+    def __call__(self, state: AgentState) -> dict:
+        last_msg = state["messages"][-1]
+        tool_calls = getattr(last_msg, "tool_calls", []) or []
+        if not HITL_ENABLED or not tool_calls:
+            return self._tool_node.invoke(state)
+
+        # 挂起 graph, 等待用户确认（payload 经 get_state 可读）
+        approved = interrupt(
+            {"tool_calls": [{"name": tc.get("name"), "args": tc.get("args"), "id": tc.get("id")} for tc in tool_calls]}
+        )
+        if approved:
+            return self._tool_node.invoke(state)
+        # 用户拒绝: 不执行工具, 返回说明让 LLM 告知用户
+        return {
+            "messages": [
+                ToolMessage(
+                    content="[用户拒绝] 工具调用被用户取消。请告知用户已取消该操作，不要执行该工具。",
+                    tool_call_id=tool_calls[0].get("id", "unknown"),
+                )
+            ]
+        }
+
+
+# --- HITL 确认等待（SSE tool_request 事件 → POST /api/hitl-confirm 恢复）---
+
+# request_id -> asyncio.Future[bool]; run_agent_stream 挂起等待, routes 端点 set_result
+_pending_confirms: dict[str, Any] = {}
+
+
+def confirm_tool_call(request_id: str, approved: bool) -> bool:
+    """设置确认结果（routes 端点调用）。返回是否存在待确认请求。"""
+    future = _pending_confirms.get(request_id)
+    if future is None or future.done():
+        return False
+    future.set_result(approved)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Build the graph
 # ---------------------------------------------------------------------------
 
 _workflow = StateGraph(AgentState)
 _workflow.add_node("agent", agent_node)
-_workflow.add_node("tools", ToolNode(AGENT_TOOLS))
+_workflow.add_node("tools", ConfirmingToolNode(AGENT_TOOLS))
 _workflow.add_edge(START, "agent")
 _workflow.add_conditional_edges(
     "agent",
@@ -230,7 +287,8 @@ _workflow.add_conditional_edges(
 )
 _workflow.add_edge("tools", "agent")
 
-agent_graph = _workflow.compile()
+# MemorySaver: HITL 的 interrupt/resume 依赖 thread 状态持久化（每请求独立 thread）
+agent_graph = _workflow.compile(checkpointer=MemorySaver())
 
 
 # ---------------------------------------------------------------------------
@@ -335,71 +393,127 @@ async def run_agent_stream(
     tool_call_count = 0  # 统计工具调用轮数, 用于超限时的用户提示
     last_usage: dict | None = None  # LLM token 用量（流式下末个 chunk 携带）
 
-    # Errors propagate to routes.py which wraps them as SSE error events
-    async for item in agent_graph.astream(
-        {
-            "messages": lc_messages,
-            "system_prompt": system_prompt,
-            "runtime_context": runtime_context,
-            "memory_context": memory_context,
-            "skill_context": skill_context,
-            "tool_rounds": 0,
-        },
-        stream_mode="messages",
-    ):
-        if isinstance(item, tuple) and len(item) == 2:
-            chunk, _metadata = item
-        else:
-            chunk = item
+    async def _consume(stream) -> AsyncGenerator[SSEEvent, None]:
+        """消费一轮 astream 消息流, 更新闭包状态并转发用户事件。
 
-        # LLM token 用量（DeepSeek 在流式末个 chunk 返回 usage_metadata）
-        if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
-            last_usage = dict(chunk.usage_metadata)
+        工具调用检测兼容两种形态:
+          - 流式 AIMessageChunk（DeepSeek 流式, tool_call_chunks 非空）
+          - 完整 AIMessage（非流式/测试 FakeLLM, tool_calls 非空）
+        """
+        nonlocal full_text, emotion_tag_sent, tool_phase, tool_call_count, last_usage
 
-        # --- Tool phase detection ---
-        if not isinstance(chunk, AIMessageChunk):
-            # ToolMessage or other — tools have returned, ready for real response
-            tool_phase = False
-            full_text = ""
-            emotion_tag_sent = False
-            continue
+        async for item in stream:
+            if isinstance(item, tuple) and len(item) == 2:
+                chunk, _metadata = item
+            else:
+                chunk = item
 
-        if chunk.tool_call_chunks:
-            # LLM is about to call tools — discard internal thinking text
-            tool_phase = True
-            full_text = ""
-            emotion_tag_sent = False
-            tool_call_count += 1
-            continue
+            # LLM token 用量（DeepSeek 在流式末个 chunk 返回 usage_metadata）
+            if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+                last_usage = dict(chunk.usage_metadata)
 
-        if tool_phase:
-            # Suppress all content while tools are executing
-            continue
-        # --- End tool phase detection ---
-
-        chunk_text: str = chunk.content if isinstance(chunk.content, str) else ""
-        if not chunk_text:
-            continue
-
-        full_text += chunk_text
-
-        if not emotion_tag_sent:
-            match = EMOTION_TAG_RE.match(full_text)
-            if match:
-                emotion = match.group(1).lower()
-                intensity = float(match.group(2))
-                yield SSEEvent(
-                    event="emotion",
-                    data={"emotion": emotion, "intensity": intensity},
-                )
-                full_text = full_text[match.end() :]
-                emotion_tag_sent = True
-                if full_text:
-                    yield SSEEvent(event="token", data={"text": full_text})
+            # --- Tool phase detection ---
+            is_chunk = isinstance(chunk, AIMessageChunk)
+            tool_calls = chunk.tool_call_chunks if is_chunk else getattr(chunk, "tool_calls", None)
+            if not is_chunk:
+                # ToolMessage 或完整消息 — 工具返回后复位
+                tool_phase = False
+                full_text = ""
+                emotion_tag_sent = False
+                if not tool_calls and isinstance(chunk, ToolMessage):
+                    continue  # 工具结果消息: 复位后跳过
+                # 完整 AIMessage（非流式/测试 FakeLLM）带文本 → 当文本块处理;
+                # 带工具调用 → 落入下方检测
+            if tool_calls:
+                # LLM is about to call tools — discard internal thinking text
+                tool_phase = True
+                full_text = ""
+                emotion_tag_sent = False
+                tool_call_count += 1
                 continue
 
-        if emotion_tag_sent:
-            yield SSEEvent(event="token", data={"text": chunk_text})
+            if tool_phase:
+                # Suppress all content while tools are executing
+                continue
+            # --- End tool phase detection ---
+
+            chunk_text: str = chunk.content if isinstance(chunk.content, str) else ""
+            if not chunk_text:
+                continue
+
+            full_text += chunk_text
+
+            if not emotion_tag_sent:
+                match = EMOTION_TAG_RE.match(full_text)
+                if match:
+                    emotion = match.group(1).lower()
+                    intensity = float(match.group(2))
+                    yield SSEEvent(
+                        event="emotion",
+                        data={"emotion": emotion, "intensity": intensity},
+                    )
+                    full_text = full_text[match.end() :]
+                    emotion_tag_sent = True
+                    if full_text:
+                        yield SSEEvent(event="token", data={"text": full_text})
+                    continue
+
+            if emotion_tag_sent:
+                yield SSEEvent(event="token", data={"text": chunk_text})
+
+    # Errors propagate to routes.py which wraps them as SSE error events
+    config = {"configurable": {"thread_id": f"chat-{rid}"}}
+    inputs = {
+        "messages": lc_messages,
+        "system_prompt": system_prompt,
+        "runtime_context": runtime_context,
+        "memory_context": memory_context,
+        "skill_context": skill_context,
+        "tool_rounds": 0,
+    }
+    async for ev in _consume(agent_graph.astream(inputs, config=config, stream_mode="messages")):
+        yield ev
+
+    # --- HITL: 工具调用前的人工确认循环 ---
+    # interrupt 不产出流式 item（messages 模式）, 流结束后用 get_state 检测;
+    # 确认后以 Command(resume=bool) 恢复同一 thread, 继续流式。
+    if HITL_ENABLED:
+        while True:
+            snapshot = agent_graph.get_state(config)
+            if not snapshot.next or not snapshot.tasks or not snapshot.tasks[0].interrupts:
+                break
+            payload = snapshot.tasks[0].interrupts[0].value
+            tool_calls = payload.get("tool_calls", []) if isinstance(payload, dict) else []
+            _logger.info(
+                "tool confirm requested",
+                extra={"request_id": rid, "tools": [tc.get("name") for tc in tool_calls]},
+            )
+            # 先注册确认 Future 再 yield 事件——保证事件到达前端时, 确认端点已可命中
+            loop = asyncio.get_running_loop()
+            confirm_future: asyncio.Future = loop.create_future()
+            _pending_confirms[rid] = confirm_future
+            yield SSEEvent(
+                event="tool_request",
+                data={
+                    "request_id": rid,
+                    "tool_calls": tool_calls,
+                    "timeout_s": HITL_CONFIRM_TIMEOUT,
+                },
+            )
+            try:
+                approved = await asyncio.wait_for(confirm_future, timeout=HITL_CONFIRM_TIMEOUT)
+            except TimeoutError:
+                approved = False  # 超时默认拒绝
+            finally:
+                _pending_confirms.pop(rid, None)
+            _logger.info(
+                "tool confirm resolved",
+                extra={"request_id": rid, "approved": approved},
+            )
+            async for ev in _consume(
+                agent_graph.astream(Command(resume=approved), config=config, stream_mode="messages")
+            ):
+                yield ev
 
     if not emotion_tag_sent:
         yield SSEEvent(

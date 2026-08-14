@@ -10,11 +10,18 @@ export interface SSEEvent {
   data: unknown;
 }
 
+export interface ToolRequest {
+  requestId: string;
+  toolCalls: Array<{ name: string; args?: Record<string, unknown> }>;
+  timeoutS?: number;
+}
+
 export interface ChatClientCallbacks {
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
   onAudio?: (base64: string, format: string, durationMs: number) => void;
   onViseme?: (visemes: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>) => void;
+  onToolRequest?: (request: ToolRequest) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -94,6 +101,13 @@ function dispatch(
       break;
     case "viseme":
       cb.onViseme?.(data as Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>);
+      break;
+    case "tool_request":
+      cb.onToolRequest?.({
+        requestId: d.request_id as string,
+        toolCalls: (d.tool_calls as Array<{ name: string; args?: Record<string, unknown> }>) || [],
+        timeoutS: d.timeout_s as number | undefined,
+      });
       break;
     case "done":
       cb.onDone?.();

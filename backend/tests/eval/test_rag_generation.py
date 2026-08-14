@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,8 @@ pytestmark = pytest.mark.skipif(
 _CONTEXT_K = 4  # 与产品 KnowledgeBase.search() 默认一致
 _MAX_CONCURRENCY = 2  # DeepSeek API 并发上限, 防限流/输出截断
 _JUDGE_MAX_TOKENS = 8192  # ragas 结构化输出 JSON 默认 1024 会被截断（IncompleteOutput）
+# 默认只评前 20 题（省时省钱, ~12 分钟）; 全量基线设环境变量 RAGAS_LIMIT=50
+_EVAL_LIMIT = int(os.getenv("RAGAS_LIMIT", "20"))
 
 
 class BgeRagasEmbedding(BaseRagasEmbedding):
@@ -109,7 +112,7 @@ async def _score_one(sem: asyncio.Semaphore, judge, embeddings, gen_client, case
         contexts = [knowledge_base._docs[idx][:2000] for idx, _ in hits]
         answer = await _generate_answer(gen_client, question, contexts)
 
-        row: dict = {"question": question, "answer_len": len(answer)}
+        row: dict = {"question": question, "answer": answer, "answer_len": len(answer)}
         for metric in _build_metrics(judge, embeddings):
             name = metric.name
             print(f"  scoring {name} | {question[:24]}...", flush=True)
@@ -133,16 +136,32 @@ async def test_rag_generation_quality() -> None:
     embeddings = BgeRagasEmbedding()
     sem = asyncio.Semaphore(_MAX_CONCURRENCY)
 
-    rows = await asyncio.gather(*[_score_one(sem, judge, embeddings, client, case) for case in EVAL_CASES])
+    rows = await asyncio.gather(
+        *[_score_one(sem, judge, embeddings, client, case) for case in EVAL_CASES[:_EVAL_LIMIT]]
+    )
 
     # 汇总与明细输出（-s 查看）
     keys = ("faithfulness", "answer_relevancy", "context_precision")
     avg = {k: sum(r[k] for r in rows) / len(rows) for k in keys}
-    print(f"\n[RAG GEN EVAL] 样本数={len(rows)}")
+    print(f"\n[RAG GEN EVAL] 样本数={len(rows)}（RAGAS_LIMIT 可扩至 50）")
     for k in keys:
         print(f"  {k}: {avg[k]:.3f}")
     for r in sorted(rows, key=lambda x: x["faithfulness"]):
         print(f"  {r['faithfulness']:.2f}/{r['answer_relevancy']:.2f}/{r['context_precision']:.2f}  {r['question']}")
+
+    # relevancy 分组分析: "资料中无信息"类 vs 正常类（解释 0.595 偏低的构成）
+    no_info = [r for r in rows if "没有相关信息" in r["answer"]]
+    normal = [r for r in rows if "没有相关信息" not in r["answer"]]
+    if no_info:
+        print(
+            f"  [分组] 无信息类 {len(no_info)} 题: answer_relevancy="
+            f"{sum(r['answer_relevancy'] for r in no_info) / len(no_info):.3f}"
+        )
+    if normal:
+        print(
+            f"  [分组] 正常类 {len(normal)} 题: answer_relevancy="
+            f"{sum(r['answer_relevancy'] for r in normal) / len(normal):.3f}"
+        )
 
     # 防回归断言（2026-08-14 基线: 0.905 / 0.595 / 0.781）
     # 阈值按基线打折留余量, 只防"链路整体失效", 不追求绝对值:

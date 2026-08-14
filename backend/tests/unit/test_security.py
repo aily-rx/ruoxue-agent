@@ -121,7 +121,9 @@ class RecordingGraph:
         self._items = items
         self.inputs: dict | None = None
 
-    async def astream(self, inputs: dict, stream_mode: str = "messages") -> AsyncGenerator[object, None]:
+    async def astream(
+        self, inputs: dict, config: dict | None = None, stream_mode: str = "messages"
+    ) -> AsyncGenerator[object, None]:
         self.inputs = inputs
         for item in self._items:
             yield item

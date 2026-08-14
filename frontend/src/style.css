@@ -282,6 +282,48 @@
   flex-shrink: 0;
 }
 
+/* HITL 工具确认条: 若雪请求调用工具时显示在输入栏内 */
+.hitl-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  font-size: 13px;
+  width: 100%;
+}
+
+.hitl-bar span {
+  flex: 1;
+  color: var(--text);
+}
+
+.hitl-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.hitl-btn.allow {
+  background: var(--primary);
+  color: #fff;
+}
+
+.hitl-btn.deny {
+  background: var(--border);
+  color: var(--text);
+}
+
+.hitl-btn:hover {
+  opacity: 0.85;
+}
+
 .chat-input {
   flex: 1;
   padding: 10px 14px;

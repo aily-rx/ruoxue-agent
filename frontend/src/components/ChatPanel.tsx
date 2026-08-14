@@ -8,6 +8,7 @@ import { useChat, VisemeFrame } from "../hooks/useChat";
 import { ChatBubble } from "./ChatBubble";
 import { VoiceButton } from "./VoiceButton";
 import { AudioManager } from "../audio/AudioManager";
+import type { ToolRequest } from "../chat/ChatClient";
 import type { Live2DCanvasHandle } from "./Live2DCanvas";
 
 const QUICK_REPLIES = ["你好", "今天天气怎么样", "你能做什么"];
@@ -133,13 +134,29 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     pendingRef.current = {};
   }, [playAudio]);
 
-  const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages } =
-    useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onToken: handleToken, onViseme: handleViseme, onDone: handleDone });
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [pendingTool, setPendingTool] = useState<ToolRequest | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Human-in-the-loop: 工具调用确认（HITL_ENABLED=true 时后端会发 tool_request）
+  const handleToolRequest = useCallback((request: ToolRequest) => {
+    setPendingTool(request);
+  }, []);
+
+  const { messages, isLoading, error, sendMessage, stopGeneration, clearMessages, confirmToolCall } =
+    useChat({ onAudio: handleAudio, onEmotion: handleEmotion, onToken: handleToken, onViseme: handleViseme, onDone: handleDone, onToolRequest: handleToolRequest });
+
+  const handleToolConfirm = useCallback((approved: boolean) => {
+    if (!pendingTool) return;
+    const rid = pendingTool.requestId;
+    setPendingTool(null);
+    confirmToolCall(rid, approved).then((ok) => {
+      if (!ok) console.warn("HITL confirm failed:", rid);
+    });
+  }, [pendingTool, confirmToolCall]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -299,6 +316,20 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
 
       {/* Input bar */}
       <footer className="input-bar">
+        {pendingTool && (
+          <div className="hitl-bar">
+            <span>
+              🤖 若雪想调用工具：
+              {pendingTool.toolCalls.map((t) => t.name).join(", ")}，是否允许？
+            </span>
+            <button className="hitl-btn allow" onClick={() => handleToolConfirm(true)}>
+              允许
+            </button>
+            <button className="hitl-btn deny" onClick={() => handleToolConfirm(false)}>
+              拒绝
+            </button>
+          </div>
+        )}
         <VoiceButton
           onRecognized={handleVoiceRecognized}
           disabled={isLoading}

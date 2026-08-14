@@ -114,6 +114,26 @@ describe("useChat 状态流转", () => {
     expect(result.current.messages).toHaveLength(0);
   });
 
+  it("confirmToolCall 调用确认端点", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useChat());
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.confirmToolCall("req-abc", true);
+    });
+
+    expect(ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/hitl-confirm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ request_id: "req-abc", approved: true }),
+      }),
+    );
+  });
+
   it("clearMessages 清空消息与错误", async () => {
     stubChatFetch();
     const { result } = renderHook(() => useChat());

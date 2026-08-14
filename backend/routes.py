@@ -239,6 +239,13 @@ class HealthResponse(BaseModel):
     asr_available: bool
 
 
+class HitlConfirmRequest(BaseModel):
+    """HITL 工具确认请求（对应 SSE tool_request 事件里的 request_id）。"""
+
+    request_id: str = Field(..., min_length=1, description="SSE tool_request 事件的 request_id")
+    approved: bool = Field(..., description="是否允许执行工具")
+
+
 # --- Routes ---
 
 
@@ -400,6 +407,20 @@ async def chat(req: ChatRequest):
             "X-Request-Id": request_id,
         },
     )
+
+
+@router.post("/api/hitl-confirm")
+async def hitl_confirm(req: HitlConfirmRequest):
+    """Human-in-the-loop 工具确认端点。
+
+    SSE 流收到 tool_request 事件（含 request_id + 工具名）后, 前端调用本端点
+    回复允许/拒绝; 后端恢复被 interrupt 挂起的 graph（超时未确认默认拒绝）。
+    """
+    from backend.agent.agent_graph import confirm_tool_call
+
+    if not confirm_tool_call(req.request_id, req.approved):
+        raise HTTPException(404, "No pending tool confirmation for this request_id")
+    return {"status": "ok", "request_id": req.request_id, "approved": req.approved}
 
 
 @router.post("/api/asr")

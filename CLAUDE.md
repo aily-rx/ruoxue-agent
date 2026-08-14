@@ -32,7 +32,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Ruoxue** — 基于 React + Live2D Cubism SDK 5 + LangChain + FastAPI 构建的本地多模态 AI Agent 数字人助手。
 
-- **当前阶段**：Phase 1-3 已完成，Phase 4 LangGraph Agent + Tools + Chroma 记忆 + FAISS RAG 已实现。Human-in-the-loop 待做。
+- **当前阶段**：Phase 1-4 已完成；Human-in-the-loop 已实现（2026-08-14，`HITL_ENABLED=true` 时工具调用前经 SSE `tool_request` 事件请求用户确认，`POST /api/hitl-confirm` 恢复，超时默认拒绝）。
 - **前端**：React 18 + TypeScript（strict 模式）+ Vite 6，端口 5173，通过 Vite proxy 将 /api 转发到 localhost:8000。
 - **后端**：Python FastAPI + LangChain + langchain-openai，调用 DeepSeek API，端口 8000。
 - **设计令牌**：紫色主色 #7c5cbf，定义在 frontend/src/style.css 的 :root 中，禁止硬编码颜色/间距。关键变量：--primary / --primary-hover / --primary-light、--surface / --surface-alt / --bg、--text / --text-secondary / --text-muted、--border、--radius / --radius-sm、--shadow、--header-h: 56px、--bubble-max-w: 70%。

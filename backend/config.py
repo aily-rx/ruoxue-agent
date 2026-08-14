@@ -50,6 +50,11 @@ RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))  # 最终返回给 LLM 的片段数
 RAG_VECTOR_K = int(os.getenv("RAG_VECTOR_K", "20"))  # 向量路候选数
 RAG_BM25_K = int(os.getenv("RAG_BM25_K", "20"))  # BM25 路候选数
 
+# --- Human-in-the-loop（工具调用前人工确认）---
+# 开启后 Agent 调用工具前会先经 SSE 发 tool_request 事件, 由用户确认后才执行
+HITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() in ("1", "true", "yes")
+HITL_CONFIRM_TIMEOUT = int(os.getenv("HITL_CONFIRM_TIMEOUT", "60"))  # 秒, 超时默认拒绝
+
 # --- ASR (Phase 2) ---
 # Default path is resolved relative to this config file (backend/ → project root)
 _ASR_DEFAULT = str(Path(__file__).resolve().parent.parent / "model_assets" / "asr" / "sensevoice-small-int8")

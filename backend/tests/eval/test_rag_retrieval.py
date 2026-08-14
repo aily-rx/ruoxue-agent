@@ -7,9 +7,13 @@
 - search_indices : 纯向量检索（FAISS + all-MiniLM-L6-v2）→ 短板① 基线
 - search_hybrid  : 向量 + BM25 混合检索（RRF 合并）→ 短板② 优化
 
-历史基线（2026-08-13，纯向量，12501 chunks）：
-    n=20  recall@1=0.050  recall@3=0.150  recall@5=0.150  mrr@5=0.092
+历史基线：
+- 2026-08-13（纯向量, 12501 chunks, n=20）:
+    recall@1=0.050  recall@3=0.150  recall@5=0.150  mrr@5=0.092
     → 根因：英文 embedding 对中文向量坍缩，见 text/rag/rag-eval.md
+- 2026-08-14（混合检索, 13501 chunks, n=50 评估集扩充后）:
+    recall@1=0.500  recall@3=0.640  recall@5=0.780  mrr@5=0.588
+    → 20 题样本小（0.95 高估），50 题是更真实的水平估计；miss 分类见 rag-eval.md
 
 基线用途：后续所有检索优化（rerank、chunk 策略调整、换 embedding）都以本文件
 输出的指标为基准做对比，保证改动可量化、可回归。

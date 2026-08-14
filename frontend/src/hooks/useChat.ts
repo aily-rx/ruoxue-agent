@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { streamChat } from "../chat/ChatClient";
+import { streamChat, ToolRequest } from "../chat/ChatClient";
 
 export interface VisemeFrame {
   time_ms: number;
@@ -36,6 +36,7 @@ export interface UseChatOptions {
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
   onViseme?: (visemes: VisemeFrame[]) => void;
+  onToolRequest?: (request: ToolRequest) => void;
   onDone?: () => void;
 }
 
@@ -53,6 +54,8 @@ export function useChat(options: UseChatOptions = {}) {
   onTokenRef.current = options.onToken;
   const onVisemeRef = useRef(options.onViseme);
   onVisemeRef.current = options.onViseme;
+  const onToolRequestRef = useRef(options.onToolRequest);
+  onToolRequestRef.current = options.onToolRequest;
   const onDoneRef = useRef(options.onDone);
   onDoneRef.current = options.onDone;
 
@@ -122,6 +125,9 @@ export function useChat(options: UseChatOptions = {}) {
               );
               onVisemeRef.current?.(visemes);
             },
+            onToolRequest(request) {
+              onToolRequestRef.current?.(request);
+            },
             onDone() {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -179,6 +185,23 @@ export function useChat(options: UseChatOptions = {}) {
     sessionId.current = genId();
   }, []);
 
+  // Human-in-the-loop: 回复工具调用确认（对应 SSE tool_request 事件）
+  const confirmToolCall = useCallback(
+    async (requestId: string, approved: boolean): Promise<boolean> => {
+      try {
+        const resp = await fetch("/api/hitl-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ request_id: requestId, approved }),
+        });
+        return resp.ok;
+      } catch {
+        return false;
+      }
+    },
+    [],
+  );
+
   return {
     messages,
     isLoading,
@@ -186,5 +209,6 @@ export function useChat(options: UseChatOptions = {}) {
     sendMessage,
     stopGeneration,
     clearMessages,
+    confirmToolCall,
   };
 }
