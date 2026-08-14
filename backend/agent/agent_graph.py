@@ -14,8 +14,10 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -55,6 +57,14 @@ from typing_extensions import TypedDict
 # 全链路结构化日志: 统一 JSON 输出(JSONFormatter), 每条带 request_id 可追溯
 _logger = logging.getLogger("agent.agent_graph")
 
+# 简单回复缓存: LRU + TTL（纯标准库实现, 不引入 cachetools）
+# key=(user_text, 当天日期), value=(过期时间戳, 回复文本)
+# 只缓存"未走工具"的纯文本回复; use_cache 由调用方（routes）显式开启,
+# 测试默认关闭, 保证缓存状态不污染测试。
+_reply_cache: OrderedDict[tuple[str, str], tuple[float, str]] = OrderedDict()
+_REPLY_CACHE_TTL_S = 600  # 10 分钟
+_REPLY_CACHE_MAX = 128
+
 # Skills directory lives at project root (deployed by skills-kit/init.sh)
 _skills_dir = str(Path(__file__).resolve().parent.parent.parent / "skills")
 _skill_loader = SkillLoader(_skills_dir)
@@ -93,7 +103,9 @@ class AgentState(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=1)
 def _build_llm() -> ChatOpenAI:
+    """模块级单例: 复用 ChatOpenAI 连接池, 避免每次请求重复初始化。"""
     return ChatOpenAI(
         model=DEEPSEEK_MODEL,
         api_key=DEEPSEEK_API_KEY,  # type: ignore[arg-type]
@@ -102,6 +114,29 @@ def _build_llm() -> ChatOpenAI:
         max_tokens=LLM_MAX_TOKENS,  # type: ignore[call-arg]
         streaming=True,
     )
+
+
+# --- 回复缓存（LRU + TTL, 纯标准库）---
+
+
+def _reply_cache_get(key: tuple[str, str]) -> str | None:
+    """取缓存; 已过期则删除并返回 None; 命中时刷新 LRU 顺序。"""
+    entry = _reply_cache.get(key)
+    if entry is None:
+        return None
+    expire_ts, text = entry
+    if time.monotonic() > expire_ts:
+        del _reply_cache[key]
+        return None
+    _reply_cache.move_to_end(key)
+    return text
+
+
+def _reply_cache_put(key: tuple[str, str], text: str) -> None:
+    """写缓存; 超出上限时淘汰最久未用的条目。"""
+    if len(_reply_cache) >= _REPLY_CACHE_MAX:
+        _reply_cache.popitem(last=False)
+    _reply_cache[key] = (time.monotonic() + _REPLY_CACHE_TTL_S, text)
 
 
 def _log_retry_sleep(retry_state: RetryCallState) -> None:
@@ -200,6 +235,7 @@ async def run_agent_stream(
     user_text: str,
     history: list[dict] | None = None,
     request_id: str | None = None,
+    use_cache: bool = False,
 ) -> AsyncGenerator[SSEEvent, None]:
     """Stream the agent's reply token-by-token via SSE.
 
@@ -211,6 +247,9 @@ async def run_agent_stream(
 
     Every stage logs a JSON line with the same request_id, so a full
     request's trace can be reassembled by filtering on that field.
+
+    use_cache: 简单回复缓存开关（routes 显式开启）。仅缓存"未走工具"的
+    纯文本回复, key 含当天日期——同一天相同问题直接命中, 省一次 LLM 调用。
     """
     rid = request_id or uuid.uuid4().hex[:12]
     start_ms = time.monotonic()
@@ -218,6 +257,17 @@ async def run_agent_stream(
         "agent request start",
         extra={"request_id": rid, "user_text": user_text[:50]},
     )
+
+    # --- 回复缓存命中检查（在进入 LLM 链路之前）---
+    if use_cache:
+        cache_key = (user_text, datetime.now().strftime("%Y-%m-%d"))
+        cached = _reply_cache_get(cache_key)
+        if cached is not None:
+            _logger.info("reply cache hit", extra={"request_id": rid})
+            yield SSEEvent(event="emotion", data={"emotion": "neutral", "intensity": 0.3})
+            yield SSEEvent(event="token", data={"text": cached})
+            yield SSEEvent(event="done", data={})
+            return
 
     # Layer 1: static persona + core behavioral rules (from skill system)
     system_prompt = EMOTION_SYSTEM_PROMPT + "\n\n" + _skill_loader.core_rules()
@@ -276,6 +326,7 @@ async def run_agent_stream(
     emotion_tag_sent = False
     tool_phase = False  # True while LLM is calling/delegating to tools
     tool_call_count = 0  # 统计工具调用轮数, 用于超限时的用户提示
+    last_usage: dict | None = None  # LLM token 用量（流式下末个 chunk 携带）
 
     # Errors propagate to routes.py which wraps them as SSE error events
     async for item in agent_graph.astream(
@@ -293,6 +344,10 @@ async def run_agent_stream(
             chunk, _metadata = item
         else:
             chunk = item
+
+        # LLM token 用量（DeepSeek 在流式末个 chunk 返回 usage_metadata）
+        if isinstance(chunk, AIMessageChunk) and chunk.usage_metadata:
+            last_usage = dict(chunk.usage_metadata)
 
         # --- Tool phase detection ---
         if not isinstance(chunk, AIMessageChunk):
@@ -349,6 +404,14 @@ async def run_agent_stream(
         elif tool_call_count >= MAX_TOOL_ROUNDS:
             # 工具循环被强制终止且没有任何回复 → 明确告知用户而不是沉默
             yield SSEEvent(event="token", data={"text": _TOOL_LIMIT_HINT})
+
+    # 成本记账: token 用量进 JSON 日志（复用短板⑤ 的 tracing 管道）
+    if last_usage:
+        _logger.info("llm usage", extra={"request_id": rid, **last_usage})
+
+    # 未走工具的纯文本回复 → 写入回复缓存（下次同问题直接命中）
+    if use_cache and tool_call_count == 0 and full_text.strip():
+        _reply_cache_put(cache_key, full_text)
 
     _logger.info(
         "agent request done",

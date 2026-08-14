@@ -13,6 +13,7 @@ BM25 alone misses paraphrases. RRF merges both rank lists robustly.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import faiss
@@ -58,6 +59,18 @@ def _embed(texts: list[str], is_query: bool = False) -> np.ndarray:
     if _bge_available():
         return _embed_bge(texts, is_query=is_query)
     return _embed_onnx(texts)
+
+
+@lru_cache(maxsize=512)
+def _embed_query(query: str) -> np.ndarray:
+    """Embed a single query with LRU caching — identical queries skip inference.
+
+    Search hot paths (search_hybrid / search_indices) call this instead of
+    _embed directly; repeated user questions re-run embedding on the same
+    query, and CPU inference is the most expensive step of retrieval.
+    Returns a (1, dim) L2-normalized vector; callers must not mutate it.
+    """
+    return _embed([query], is_query=True)
 
 
 def _embed_onnx(texts: list[str]) -> np.ndarray:
@@ -311,7 +324,7 @@ class KnowledgeBase:
             return self.search_indices(query, k)
 
         # 1. Vector top-N (rank starts at 1)
-        q_vec = _embed([query], is_query=True)
+        q_vec = _embed_query(query)
         distances, indices = self._index.search(q_vec, min(vector_k, self._index.ntotal))
         vector_hits = [(int(idx), rank) for rank, idx in enumerate(indices[0], start=1) if idx >= 0]
 
@@ -337,7 +350,7 @@ class KnowledgeBase:
         if self._index is None or self._index.ntotal == 0:
             return []
 
-        q_vec = _embed([query], is_query=True)
+        q_vec = _embed_query(query)
         distances, indices = self._index.search(q_vec, min(k, self._index.ntotal))
         return [
             (int(idx), float(sim)) for idx, sim in zip(indices[0], distances[0], strict=True) if idx >= 0 and sim >= 0.3

@@ -247,7 +247,7 @@ async def chat(req: ChatRequest):
         full_reply = ""
         has_error = False
         try:
-            async for sse_event in run_agent_stream(req.text, history, request_id=request_id):
+            async for sse_event in run_agent_stream(req.text, history, request_id=request_id, use_cache=True):
                 event = sse_event.event
                 data = sse_event.data
 
