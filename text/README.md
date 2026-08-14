@@ -32,3 +32,4 @@
 | `retrospective/短板4-错误处理与容错补全过程复盘.md` | retrospective | 四层容错补全过程复盘（循环上限/LLM 重试/防幻觉/文件上限） | 2026-08-14 |
 | `retrospective/短板5-可观测性补全过程复盘.md` | retrospective | 全链路 JSON 日志与 request_id 追踪补全过程复盘 | 2026-08-14 |
 | `retrospective/短板6-并发缓存与成本补全过程复盘.md` | retrospective | 单例/embedding 缓存/回复缓存三边界/usage 记账补全过程复盘 | 2026-08-14 |
+| `retrospective/短板7-安全与Prompt注入防护补全过程复盘.md` | retrospective | 白名单沙箱/防注入隔离/输出护栏补全过程复盘（7 短板收官） | 2026-08-14 |

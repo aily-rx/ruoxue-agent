@@ -91,6 +91,18 @@ def _strip_symbols(text: str) -> str:
     return _SYMBOL_RE.sub("", text).strip()
 
 
+# 敏感输出过滤（输出护栏）: 防止回复泄露密钥类信息（简单版 demo 防护）
+_SENSITIVE_RE = re.compile(
+    r"(password|api[_-]?key|secret|access[_-]?token)\s*[:=]\s*\S+",
+    re.IGNORECASE,
+)
+
+
+def _filter_sensitive(text: str) -> str:
+    """拦截回复中的敏感模式, 替换为 [已过滤]。"""
+    return _SENSITIVE_RE.sub("[已过滤]", text)
+
+
 def _boundaries_to_char_durations(
     word_boundaries: list[dict],
 ) -> list[float]:
@@ -254,10 +266,11 @@ async def chat(req: ChatRequest):
                 if event == "token":
                     text = data.get("text", "")
                     full_reply += text  # raw for memory
-                    # Strip action tags + emoji + symbols from display text
+                    # Strip action tags + emoji + symbols + sensitive patterns
                     clean = _strip_action_tags(text)
                     clean = _strip_emoji(clean)
                     clean = _strip_symbols(clean)
+                    clean = _filter_sensitive(clean)
                     if clean:
                         yield "event: token\n"
                         yield f"data: {json.dumps({'text': clean}, ensure_ascii=False)}\n"
@@ -279,10 +292,11 @@ async def chat(req: ChatRequest):
             # ---- Phase 2: TTS + Viseme after LLM reply is complete ----
             if not has_error and full_reply.strip():
                 try:
-                    # Strip non-speakable content: emoji, action tags, symbols
+                    # Strip non-speakable content: emoji, action tags, symbols, sensitive
                     tts_text = _strip_emoji(full_reply)
                     tts_text = _strip_action_tags(tts_text)
                     tts_text = _strip_symbols(tts_text)
+                    tts_text = _filter_sensitive(tts_text)
                     if not tts_text:
                         tts_text = full_reply  # fallback if everything was stripped
 

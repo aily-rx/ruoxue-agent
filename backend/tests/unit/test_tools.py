@@ -78,16 +78,21 @@ class TestToolErrorHandling:
         assert "[工具执行失败]" in result
         assert "不要编造知识库内容" in result
 
-    def test_read_file_rejects_oversized_file(self, tmp_path):
+    def test_read_file_rejects_oversized_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.agent.tools._UPLOADS_DIR", tmp_path)  # 沙箱指向临时目录
         big = tmp_path / "big.txt"
         big.write_bytes(b"x" * (5 * 1024 * 1024 + 1))
         result = self._tool("read_file").invoke({"path": str(big)})
         assert "上限" in result
 
-    def test_read_file_missing_returns_error(self):
-        result = self._tool("read_file").invoke({"path": "/no/such/file.txt"})
+    def test_read_file_missing_returns_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.agent.tools._UPLOADS_DIR", tmp_path)
+        result = self._tool("read_file").invoke({"path": str(tmp_path / "missing.txt")})
         assert "not found" in result
 
-    def test_read_file_directory_returns_error(self, tmp_path):
-        result = self._tool("read_file").invoke({"path": str(tmp_path)})
+    def test_read_file_directory_returns_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("backend.agent.tools._UPLOADS_DIR", tmp_path)
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        result = self._tool("read_file").invoke({"path": str(subdir)})
         assert "directory" in result
