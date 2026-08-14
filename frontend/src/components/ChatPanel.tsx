@@ -126,6 +126,8 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   }, [flushPending]);
 
   const handleDone = useCallback(() => {
+    // 流结束（含 HITL 超时自动拒绝后）→ 确认条必须消失, 否则残留挂起
+    setPendingTool(null);
     const p = pendingRef.current;
     if (p.base64 && !p.visemes) {
       // Audio arrived without visemes — play it (reset handled by audio onended)
@@ -157,6 +159,11 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
       if (!ok) console.warn("HITL confirm failed:", rid);
     });
   }, [pendingTool, confirmToolCall]);
+
+  // 错误发生时确认条也应消失（后端可能中断流, 不触发 onDone）
+  useEffect(() => {
+    if (error) setPendingTool(null);
+  }, [error]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {

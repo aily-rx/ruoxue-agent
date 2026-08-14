@@ -471,49 +471,57 @@ async def run_agent_stream(
         "skill_context": skill_context,
         "tool_rounds": 0,
     }
-    async for ev in _consume(agent_graph.astream(inputs, config=config, stream_mode="messages")):
-        yield ev
+    try:
+        async for ev in _consume(agent_graph.astream(inputs, config=config, stream_mode="messages")):
+            yield ev
 
-    # --- HITL: 工具调用前的人工确认循环 ---
-    # interrupt 不产出流式 item（messages 模式）, 流结束后用 get_state 检测;
-    # 确认后以 Command(resume=bool) 恢复同一 thread, 继续流式。
-    if HITL_ENABLED:
-        while True:
-            snapshot = agent_graph.get_state(config)
-            if not snapshot.next or not snapshot.tasks or not snapshot.tasks[0].interrupts:
-                break
-            payload = snapshot.tasks[0].interrupts[0].value
-            tool_calls = payload.get("tool_calls", []) if isinstance(payload, dict) else []
-            _logger.info(
-                "tool confirm requested",
-                extra={"request_id": rid, "tools": [tc.get("name") for tc in tool_calls]},
-            )
-            # 先注册确认 Future 再 yield 事件——保证事件到达前端时, 确认端点已可命中
-            loop = asyncio.get_running_loop()
-            confirm_future: asyncio.Future = loop.create_future()
-            _pending_confirms[rid] = confirm_future
-            yield SSEEvent(
-                event="tool_request",
-                data={
-                    "request_id": rid,
-                    "tool_calls": tool_calls,
-                    "timeout_s": HITL_CONFIRM_TIMEOUT,
-                },
-            )
-            try:
-                approved = await asyncio.wait_for(confirm_future, timeout=HITL_CONFIRM_TIMEOUT)
-            except TimeoutError:
-                approved = False  # 超时默认拒绝
-            finally:
-                _pending_confirms.pop(rid, None)
-            _logger.info(
-                "tool confirm resolved",
-                extra={"request_id": rid, "approved": approved},
-            )
-            async for ev in _consume(
-                agent_graph.astream(Command(resume=approved), config=config, stream_mode="messages")
-            ):
-                yield ev
+        # --- HITL: 工具调用前的人工确认循环 ---
+        # interrupt 不产出流式 item（messages 模式）, 流结束后用 get_state 检测;
+        # 确认后以 Command(resume=bool) 恢复同一 thread, 继续流式。
+        if HITL_ENABLED:
+            while True:
+                snapshot = agent_graph.get_state(config)
+                if not snapshot.next or not snapshot.tasks or not snapshot.tasks[0].interrupts:
+                    break
+                payload = snapshot.tasks[0].interrupts[0].value
+                tool_calls = payload.get("tool_calls", []) if isinstance(payload, dict) else []
+                _logger.info(
+                    "tool confirm requested",
+                    extra={"request_id": rid, "tools": [tc.get("name") for tc in tool_calls]},
+                )
+                # 先注册确认 Future 再 yield 事件——保证事件到达前端时, 确认端点已可命中
+                loop = asyncio.get_running_loop()
+                confirm_future: asyncio.Future = loop.create_future()
+                _pending_confirms[rid] = confirm_future
+                yield SSEEvent(
+                    event="tool_request",
+                    data={
+                        "request_id": rid,
+                        "tool_calls": tool_calls,
+                        "timeout_s": HITL_CONFIRM_TIMEOUT,
+                    },
+                )
+                try:
+                    approved = await asyncio.wait_for(confirm_future, timeout=HITL_CONFIRM_TIMEOUT)
+                except TimeoutError:
+                    approved = False  # 超时默认拒绝
+                finally:
+                    _pending_confirms.pop(rid, None)
+                _logger.info(
+                    "tool confirm resolved",
+                    extra={"request_id": rid, "approved": approved},
+                )
+                async for ev in _consume(
+                    agent_graph.astream(Command(resume=approved), config=config, stream_mode="messages")
+                ):
+                    yield ev
+    finally:
+        # 清理 checkpointer thread: MemorySaver 是内存存储, 不清理会随请求数增长
+        # （HITL 挂起期间 generator 未结束, 不会走到这里——resume 完成或超时后才清理）
+        try:
+            agent_graph.delete_thread(config["configurable"]["thread_id"])
+        except Exception:
+            pass
 
     if not emotion_tag_sent:
         yield SSEEvent(
