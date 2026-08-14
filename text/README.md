@@ -29,3 +29,4 @@
 | `retrospective/短板1-评估体系补全过程复盘.md` | retrospective | 建立 RAG 评估体系的完整过程复盘（含排查思维链） | 2026-08-13 |
 | `retrospective/短板2-混合检索补全过程复盘.md` | retrospective | BM25 + 中文 embedding + RRF 混合检索补全过程复盘 | 2026-08-13 |
 | `retrospective/短板3-测试覆盖率补全过程复盘.md` | retrospective | 测试覆盖率 14%→74% 补全过程复盘（mock 手法/断言教训） | 2026-08-14 |
+| `retrospective/短板4-错误处理与容错补全过程复盘.md` | retrospective | 四层容错补全过程复盘（循环上限/LLM 重试/防幻觉/文件上限） | 2026-08-14 |

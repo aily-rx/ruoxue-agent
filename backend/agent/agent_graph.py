@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from backend.agent.chroma_memory import chroma_memory
 from backend.agent.emotional_agent import (
@@ -46,11 +46,18 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from tenacity import retry, stop_after_attempt, wait_exponential
 from typing_extensions import TypedDict
 
 # Skills directory lives at project root (deployed by skills-kit/init.sh)
 _skills_dir = str(Path(__file__).resolve().parent.parent.parent / "skills")
 _skill_loader = SkillLoader(_skills_dir)
+
+# 防无限工具循环: agent 节点最多执行 MAX_TOOL_ROUNDS 轮（即最多 5 次工具调用）
+MAX_TOOL_ROUNDS = 5
+_TOOL_LIMIT_HINT = (
+    "抱歉，这个任务需要反复调用工具的步骤太多，我已经尽力了。请换一个更简单的问法，或者把任务拆小一点再试。"
+)
 
 # ---------------------------------------------------------------------------
 # LangGraph State
@@ -72,6 +79,7 @@ class AgentState(TypedDict):
     runtime_context: str
     memory_context: str
     skill_context: str
+    tool_rounds: int  # agent 节点执行轮数, 超限强制 END 防无限工具循环
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +96,19 @@ def _build_llm() -> ChatOpenAI:
         max_tokens=LLM_MAX_TOKENS,  # type: ignore[call-arg]
         streaming=True,
     )
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, max=10),
+    reraise=True,
+)
+async def _ainvoke_with_retry(llm: Any, messages: list[BaseMessage]) -> BaseMessage:
+    """LLM 调用带指数退避重试（网络抖动/限流自动恢复, 3 次后原样抛出）。
+
+    最后一次异常由 reraise=True 原样抛出, 由 routes.py 包装成 SSE error 事件。
+    """
+    return await llm.ainvoke(messages)
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +137,15 @@ async def agent_node(state: AgentState) -> dict:
 
     system = SystemMessage(content=system_text)
     messages = [system] + list(state["messages"])
-    response = await llm_with_tools.ainvoke(messages)
-    return {"messages": [response]}
+    response = await _ainvoke_with_retry(llm_with_tools, messages)
+    rounds = state.get("tool_rounds", 0) + 1
+    return {"messages": [response], "tool_rounds": rounds}
 
 
 def should_continue(state: AgentState) -> str:
-    """Router: check whether the last message contains tool calls."""
+    """Router: 超轮数强制 END, 否则检查末条消息是否含工具调用。"""
+    if state.get("tool_rounds", 0) > MAX_TOOL_ROUNDS:
+        return END
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         return "tools"
@@ -193,7 +217,7 @@ async def run_agent_stream(
         skill_content = _skill_loader.load(skill_name)
         if skill_content:
             skill_context = (
-                f"[技能指令 — {skill_name}]\n" "以下是适用于当前任务的专项指令，请严格遵循：\n\n" f"{skill_content}"
+                f"[技能指令 — {skill_name}]\n以下是适用于当前任务的专项指令，请严格遵循：\n\n{skill_content}"
             )
             print(f"[Skill] matched '{skill_name}' for input: {user_text[:50]}...")
 
@@ -212,6 +236,7 @@ async def run_agent_stream(
     full_text = ""
     emotion_tag_sent = False
     tool_phase = False  # True while LLM is calling/delegating to tools
+    tool_call_count = 0  # 统计工具调用轮数, 用于超限时的用户提示
 
     # Errors propagate to routes.py which wraps them as SSE error events
     async for item in agent_graph.astream(
@@ -221,6 +246,7 @@ async def run_agent_stream(
             "runtime_context": runtime_context,
             "memory_context": memory_context,
             "skill_context": skill_context,
+            "tool_rounds": 0,
         },
         stream_mode="messages",
     ):
@@ -242,6 +268,7 @@ async def run_agent_stream(
             tool_phase = True
             full_text = ""
             emotion_tag_sent = False
+            tool_call_count += 1
             continue
 
         if tool_phase:
@@ -280,5 +307,8 @@ async def run_agent_stream(
         )
         if full_text:
             yield SSEEvent(event="token", data={"text": full_text})
+        elif tool_call_count >= MAX_TOOL_ROUNDS:
+            # 工具循环被强制终止且没有任何回复 → 明确告知用户而不是沉默
+            yield SSEEvent(event="token", data={"text": _TOOL_LIMIT_HINT})
 
     yield SSEEvent(event="done", data={})

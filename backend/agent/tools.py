@@ -19,6 +19,9 @@ from tavily import TavilyClient
 
 _tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
+# read_file 字节上限: 防止读超大文件卡死 Agent 链路
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 # ===========================================================================
 # search_web
@@ -61,7 +64,7 @@ def search_web(query: str) -> str:
             lines.append(f"   {url}")
         return "\n".join(lines)
     except Exception as e:
-        return f"Search error: {e}"
+        return f"[工具执行失败] search_web 出错：{e}。请告知用户网络暂时不可用，不要编造搜索结果。"
 
 
 # ===========================================================================
@@ -88,6 +91,11 @@ def read_file(path: str) -> str:
         return f"Error: file not found: {path}"
     if filepath.is_dir():
         return f"Error: '{path}' is a directory, not a file"
+    try:
+        if filepath.stat().st_size > MAX_FILE_SIZE_BYTES:
+            return f"Error: 文件超过 {MAX_FILE_SIZE_BYTES // 1024 // 1024}MB 上限，拒绝读取: {path}"
+    except OSError:
+        return f"Error: cannot stat file: {path}"
 
     suffix = filepath.suffix.lower()
 
@@ -167,9 +175,9 @@ def get_weather(city: str) -> str:
             f"\n【未来预报】\n" + "\n".join(forecast_lines)
         )
     except httpx.HTTPError as e:
-        return f"天气查询网络错误: {e}"
+        return f"[工具执行失败] get_weather 网络错误：{e}。请告知用户天气服务暂时不可用，不要编造天气数据。"
     except Exception as e:
-        return f"天气查询失败: {e}"
+        return f"[工具执行失败] get_weather 出错：{e}。请告知用户天气服务暂时不可用，不要编造天气数据。"
 
 
 # ===========================================================================
@@ -238,7 +246,7 @@ def search_knowledge(query: str) -> str:
         result = knowledge_base.search(query)
         return result
     except Exception as e:
-        return f"Knowledge base error: {e}"
+        return f"[工具执行失败] search_knowledge 出错：{e}。请告知用户知识库暂时不可用，不要编造知识库内容。"
 
 
 # ===========================================================================
