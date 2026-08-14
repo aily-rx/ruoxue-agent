@@ -18,6 +18,7 @@
 1. 判断文档类型，放进对应分类目录（不新建分类除非确有需要）
 2. 更新本文档索引表（下表）
 3. 文档间相互引用时使用相对 `text/` 路径（如 `text/rag/rag-eval.md`）
+4. **每个短板补全完成后，必须落盘复盘文档**：按 `retrospective/短板1-评估体系补全过程复盘.md` 的固定格式（30 秒版 / 背景 / 步骤详解 / 思维模式 / 概念词典 / 下一步 / 文件清单），存为 `retrospective/短板N-xxx补全过程复盘.md`，并登记到本索引
 
 ## 索引
 
@@ -27,3 +28,4 @@
 | `rag/rag-eval.md` | rag | RAG 检索质量评估基线（Recall@k / MRR），三配置对比 0.15→0.95 | 2026-08-13 |
 | `retrospective/短板1-评估体系补全过程复盘.md` | retrospective | 建立 RAG 评估体系的完整过程复盘（含排查思维链） | 2026-08-13 |
 | `retrospective/短板2-混合检索补全过程复盘.md` | retrospective | BM25 + 中文 embedding + RRF 混合检索补全过程复盘 | 2026-08-13 |
+| `retrospective/短板3-测试覆盖率补全过程复盘.md` | retrospective | 测试覆盖率 14%→74% 补全过程复盘（mock 手法/断言教训） | 2026-08-14 |
