@@ -4,3 +4,7 @@ mypy>=1.11
 pytest>=8.3
 pytest-asyncio>=0.24
 httpx>=0.28   # for TestClient async
+
+# --- Optional: RAGAS 生成质量评估（短板① 第二层, 仅本地手动跑, CI 不装）---
+# pip install ragas   # 未装时 test_rag_generation.py 自动跳过
+# 注意: ragas 0.4.3 与 langchain-community 有兼容问题, 已由 tests/eval/ragas_compat.py 处理
