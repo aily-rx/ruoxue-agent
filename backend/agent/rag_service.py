@@ -19,6 +19,7 @@ from pathlib import Path
 import faiss
 import jieba
 import numpy as np
+from backend.config import RAG_BM25_K, RAG_TOP_K, RAG_VECTOR_K
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from rank_bm25 import BM25Okapi
 
@@ -287,7 +288,7 @@ class KnowledgeBase:
     # Search
     # ------------------------------------------------------------------
 
-    def search(self, query: str, k: int = 4) -> str:
+    def search(self, query: str, k: int | None = None) -> str:
         """Hybrid search (vector + BM25, RRF-fused), return formatted results."""
         hits = self.search_hybrid(query, k=k)
         if not hits:
@@ -305,9 +306,9 @@ class KnowledgeBase:
     def search_hybrid(
         self,
         query: str,
-        k: int = 4,
-        vector_k: int = 20,
-        bm25_k: int = 20,
+        k: int | None = None,
+        vector_k: int | None = None,
+        bm25_k: int | None = None,
     ) -> list[tuple[int, float]]:
         """Hybrid search: FAISS vector top-N + BM25 keyword top-N, merged by RRF.
 
@@ -317,7 +318,17 @@ class KnowledgeBase:
         (cosine similarity vs BM25 term-frequency scores).
 
         Falls back to pure vector search when the BM25 index is unavailable.
+
+        参数默认值来自 backend.config（RAG_TOP_K / RAG_VECTOR_K / RAG_BM25_K），
+        调参实验只需改环境变量或 .env，不用改代码。
         """
+        if k is None:
+            k = RAG_TOP_K
+        if vector_k is None:
+            vector_k = RAG_VECTOR_K
+        if bm25_k is None:
+            bm25_k = RAG_BM25_K
+
         if self._index is None or self._index.ntotal == 0:
             return []
         if self._bm25 is None:
@@ -340,7 +351,7 @@ class KnowledgeBase:
 
         return sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:k]
 
-    def search_indices(self, query: str, k: int = 4) -> list[tuple[int, float]]:
+    def search_indices(self, query: str, k: int | None = None) -> list[tuple[int, float]]:
         """Return raw (chunk_index, similarity) pairs for eval / hybrid retrieval.
 
         Unlike search(), this returns index positions instead of formatted text,
@@ -349,6 +360,9 @@ class KnowledgeBase:
         """
         if self._index is None or self._index.ntotal == 0:
             return []
+
+        if k is None:
+            k = RAG_TOP_K
 
         q_vec = _embed_query(query)
         distances, indices = self._index.search(q_vec, min(k, self._index.ntotal))

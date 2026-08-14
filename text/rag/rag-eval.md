@@ -33,8 +33,10 @@
 4. **生成质量评估未做**：本文件只覆盖检索层（Recall/MRR）。生成层（RAGAS 的
    faithfulness / answer_relevancy / context_precision）尚未落地——需要少量 API 调用，
    是"检索层已量化、生成层待补"的决策点（面试表述见 `text/interview/面试准备与项目补全指南.md`）。
-5. **检索参数未配置化**：`search_hybrid()` 的 k/vector_k/bm25_k 仍是硬编码默认值，
-   未进 `backend/config.py`（如 `RAG_TOP_K`），调参实验需改代码而非改配置。
+   （2026-08-14 已解决：见 `text/rag/rag-generation-eval.md`）
+5. **检索参数配置化**：✅ 已完成（2026-08-14）——`k/vector_k/bm25_k` 默认值
+   已迁移到 `backend/config.py` 的 `RAG_TOP_K / RAG_VECTOR_K / RAG_BM25_K`，
+   调参实验只需改环境变量/.env，不用改代码（显式传参仍优先）。
 
 ## 四、环境与依赖说明
 

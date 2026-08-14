@@ -145,3 +145,29 @@ def test_clear_removes_index_files(tmp_path: Path) -> None:
     assert kb.chunk_count == 0
     assert not Path(kb_dir, "knowledge.index").exists()
     assert not Path(kb_dir, "knowledge_meta.json").exists()
+
+
+# --- 检索参数配置化（RAG_TOP_K 等来自 config, 调参不改代码）---
+
+
+def test_hybrid_defaults_follow_config() -> None:
+    import inspect
+
+    from backend.config import RAG_BM25_K, RAG_TOP_K, RAG_VECTOR_K
+
+    sig = inspect.signature(KnowledgeBase.search_hybrid)
+    assert sig.parameters["k"].default is None  # None → 运行时解析为 RAG_TOP_K
+    assert RAG_TOP_K > 0 and RAG_VECTOR_K > 0 and RAG_BM25_K > 0
+
+
+def test_search_honors_explicit_k(tmp_path: Path) -> None:
+    """显式传 k 时优先于 config 默认值。"""
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    docs_dir.joinpath("intro.md").write_text(_DOC, encoding="utf-8")
+
+    kb = KnowledgeBase(persist_dir=str(tmp_path / "faiss_data"))
+    kb.index_directory(str(docs_dir))
+
+    hits = kb.search_hybrid("混合检索", k=1)
+    assert len(hits) <= 1

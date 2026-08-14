@@ -47,6 +47,16 @@ python -m pytest backend/tests/eval/test_rag_generation.py -v -s
 
 每次改 chunk 策略 / embedding / 检索 k / 生成 prompt 后重跑两套，检索层看 Recall/MRR，生成层看 RAGAS——**两个数字一起动才算优化**。
 
+## 五、防回归线（2026-08-14 定值, 已固化为测试断言）
+
+按基线（0.905 / 0.595 / 0.781）打折留余量，只防"链路整体失效"，不追绝对值：
+
+| 指标 | 基线 | 防回归线 | 说明 |
+|---|---|---|---|
+| faithfulness | 0.905 | **≥ 0.60** | 编造类回归 |
+| context_precision | 0.781 | **≥ 0.50** | 检索上下文支撑度回归 |
+| answer_relevancy | 0.595 | **≥ 0.30** | 已知系统性偏低, 仅防完全失效 |
+
 ## 五、后续优化方向
 
 1. answer_relevancy 分析：对"资料中无信息"类回答单独统计（它们拉低均值），或换 strictness 参数

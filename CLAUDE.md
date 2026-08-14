@@ -354,7 +354,11 @@ while (true) {
 | Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
 | Phase 4 | ✅ 完成 | Agent 智能体：LangGraph + 5 工具 + Chroma 记忆 + FAISS RAG |
 
-> 无正式测试框架（无 pytest / vitest）、无 lint 配置（无 ruff / ESLint）。开发中通过 curl 自测后端 + 浏览器 DevTools 验证前端。
+> **测试与质量现状（2026-08-14 更新）**：后端 116 个测试全绿（unit + integration + eval），行覆盖率 **82%**；
+> 前端 vitest + ESLint 已配置；ruff + mypy + pre-commit/pre-push hooks 全量生效。
+> 测试命令：`python -m pytest backend/tests/ -q --asyncio-mode=auto`（后端，项目根目录执行）、
+> `cd frontend && npm run test`（前端）、`cd backend && ruff check .`（lint）。
+> RAG 检索评估（`backend/tests/eval/`）依赖真实 `faiss_data/` 索引 + `DEEPSEEK_API_KEY`，CI 上自动跳过、本地手动跑。
 
 ## 开发顺序约定
 
@@ -395,6 +399,9 @@ Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/
 | `docs/phase2-summary.md` | Phase 2 完成总结（ASR/TTS/G2P/Viseme 管线、录放音、音画同步） |
 | `docs/phase1-summary.md` | Phase 1 完成总结（SSE 流式、情绪标签、会话记忆、聊天 UI） |
 | `Agent.md` | 共享知识库索引（经验文档触发机制、命名规范、架构规则） |
+| `text/README.md` | **过程性文档索引**（面试准备/评估数据/短板复盘——一律归 `text/` 分类，不进 `docs/`） |
+| `text/rag/rag-eval.md` | RAG 检索评估基线（Recall@5 0.95 / MRR 0.749） |
+| `text/rag/rag-generation-eval.md` | RAG 生成评估基线（RAGAS：faithfulness 0.905 / relevancy 0.595 / precision 0.781） |
 <!-- SKILLS:START -->
 
 | Skill | 触发关键词 | 位置 |

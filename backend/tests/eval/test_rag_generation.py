@@ -144,7 +144,14 @@ async def test_rag_generation_quality() -> None:
     for r in sorted(rows, key=lambda x: x["faithfulness"]):
         print(f"  {r['faithfulness']:.2f}/{r['answer_relevancy']:.2f}/{r['context_precision']:.2f}  {r['question']}")
 
-    # 基线断言（防链路整体失效）: 分数必须落在 0-1 且能算出均值
+    # 防回归断言（2026-08-14 基线: 0.905 / 0.595 / 0.781）
+    # 阈值按基线打折留余量, 只防"链路整体失效", 不追求绝对值:
+    #   faithfulness 0.905 → ≥ 0.60（编造类回归）
+    #   context_precision 0.781 → ≥ 0.50（检索上下文支撑度回归）
+    #   answer_relevancy 已知系统性偏低 → ≥ 0.30（仅防完全失效）
     for k in keys:
         assert 0.0 <= avg[k] <= 1.0, f"{k} 超出合法范围: {avg[k]}"
+    assert avg["faithfulness"] >= 0.60, f"faithfulness 回归: {avg['faithfulness']:.3f} < 0.60"
+    assert avg["context_precision"] >= 0.50, f"context_precision 回归: {avg['context_precision']:.3f} < 0.50"
+    assert avg["answer_relevancy"] >= 0.30, f"answer_relevancy 回归: {avg['answer_relevancy']:.3f} < 0.30"
     assert all(0.0 <= r[k] <= 1.0 for r in rows for k in keys)

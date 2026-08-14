@@ -45,6 +45,11 @@ TTS_PROXY = os.getenv("TTS_PROXY", "") or None  # optional HTTP proxy for Edge T
 # --- Agent Tools ---
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
+# --- RAG 检索参数（配置化: 调参实验不改代码）---
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))  # 最终返回给 LLM 的片段数
+RAG_VECTOR_K = int(os.getenv("RAG_VECTOR_K", "20"))  # 向量路候选数
+RAG_BM25_K = int(os.getenv("RAG_BM25_K", "20"))  # BM25 路候选数
+
 # --- ASR (Phase 2) ---
 # Default path is resolved relative to this config file (backend/ → project root)
 _ASR_DEFAULT = str(Path(__file__).resolve().parent.parent / "model_assets" / "asr" / "sensevoice-small-int8")
