@@ -78,9 +78,8 @@ repos:
         name: "skill: diagnose-bugs 根因描述"
         entry: bash scripts/check-diagnose.sh
         language: system
-        stages: [pre-commit]
+        stages: [commit-msg]
         always_run: true
-        pass_filenames: false
 
   # ---- 技能硬约束：构建时（pre-push）----
   - repo: local
