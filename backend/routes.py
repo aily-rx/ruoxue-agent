@@ -5,6 +5,7 @@ Phase 2: adds ASR endpoint and TTS audio + viseme events.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from backend.agent.agent_graph import run_agent_stream
 from backend.agent.chroma_memory import chroma_memory
+from backend.agent.emotional_agent import SSEEvent
 from backend.agent.memory import memory
 from backend.asr.asr_service import asr_service
 from backend.tts.tts_service import synthesize_with_word_boundary
@@ -101,6 +103,130 @@ _SENSITIVE_RE = re.compile(
 def _filter_sensitive(text: str) -> str:
     """拦截回复中的敏感模式, 替换为 [已过滤]。"""
     return _SENSITIVE_RE.sub("[已过滤]", text)
+
+
+def _clean_for_tts(text: str) -> str:
+    """逐句 TTS 前的文本清洗 — 与 token 显示过滤同规则（四重过滤）。"""
+    text = _strip_action_tags(text)
+    text = _strip_emoji(text)
+    text = _strip_symbols(text)
+    return _filter_sensitive(text).strip()
+
+
+# ── 句子级分片（边生成边合成）────────────────────────────────────────
+
+# 句末标点集合: 中文句末符 + 半角 !?;。刻意不含 ASCII '.' 和 '．',
+# 避免 3.14 / Mr. / 版本号 1.2.3 被误断句。
+_SENTENCE_END = "。！？!?；;…\n"
+_SENTENCE_SPLIT_RE = re.compile(rf"[^{_SENTENCE_END}]*[{_SENTENCE_END}]+")
+
+# 残句兜底切分阈值: 模型偶发漏打句末标点时, 残句超过该长度就在最近逗号处
+# 强切, 保证分片延迟有界（否则长尾文本会一直等到流结束才合成）。
+_MAX_CHUNK_CHARS = 40
+_MIN_CUT_CHARS = 20
+
+
+def _split_sentences(buffer: str) -> tuple[list[str], str]:
+    """从流式累积文本中切出完整句: 返回 (完整句列表, 剩余残句)。
+
+    逐 token 调用: 文本不含句末符时全部留在残句; 句末符一到, 其前面的
+    整句立即被切出——保证句子文本完整后才进入 TTS。
+    残句超长（漏标点）时在最近逗号处兜底强切。
+    """
+    sentences = _SENTENCE_SPLIT_RE.findall(buffer)
+    consumed = sum(len(s) for s in sentences)
+    rest = buffer[consumed:]
+
+    if len(rest) >= _MAX_CHUNK_CHARS:
+        cut = rest.rfind("，")
+        if cut >= _MIN_CUT_CHARS:
+            sentences.append(rest[: cut + 1])
+            rest = rest[cut + 1 :]
+        else:
+            # 没有合适的逗号切点 → 整段强切（保证延迟有界）
+            sentences.append(rest)
+            rest = ""
+
+    return sentences, rest
+
+
+async def _synthesize_chunk(seq: int, text: str) -> dict | None:
+    """合成一个句子的 (audio, viseme), TTS 失败返回 None（非致命, 只丢该句音频）。
+
+    复用原有整段合成的逻辑: Edge TTS WordBoundary → 逐字时长 → G2P 口型
+    序列 → 按真实音频时长缩放。逐句独立缩放, 时间轴各自从 0 开始。
+    """
+    try:
+        audio_bytes, word_boundaries = await synthesize_with_word_boundary(text)
+    except Exception as exc:
+        print(f"[TTS] chunk {seq} synthesis failed: {exc}")
+        return None
+
+    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+    has_boundaries = len(word_boundaries) > 0
+    audio_fmt = "mp3" if has_boundaries else "wav"
+
+    if has_boundaries:
+        last = word_boundaries[-1]
+        boundary_ms = int((last["offset"] + last["duration"]) / 10000)
+        mp3_frame_ms = _mp3_duration(audio_bytes)
+        audio_duration_ms = max(boundary_ms, mp3_frame_ms)
+        char_durations = _boundaries_to_char_durations(word_boundaries)
+    else:
+        audio_duration_ms = _wav_duration(audio_bytes)
+        char_durations = None
+
+    # Fallback ms_per_char for pyttsx3 (no boundaries)
+    cjk_count = sum(1 for ch in text if "一" <= ch <= "鿿")
+    non_cjk_count = len(text) - cjk_count
+    total_speak_ms = audio_duration_ms - non_cjk_count * 80
+    ms_per_char = max(total_speak_ms / cjk_count, 20.0) if (cjk_count > 0 and total_speak_ms > 0) else 30.0
+
+    viseme_seq = text_to_viseme_sequence(
+        text,
+        ms_per_char=ms_per_char,
+        char_durations=char_durations,
+    )
+    if viseme_seq and audio_duration_ms > 0:
+        raw_last_ms = viseme_seq[-1]["time_ms"]
+        if raw_last_ms > 0:
+            scale = audio_duration_ms / raw_last_ms
+            for v in viseme_seq:
+                v["time_ms"] = round(v["time_ms"] * scale, 1)
+
+    return {
+        "audio": {"base64": audio_b64, "format": audio_fmt, "duration_ms": audio_duration_ms},
+        "viseme": viseme_seq,
+    }
+
+
+def _format_tts_chunk(chunk: dict) -> list[str]:
+    """把单个句子的合成结果格式化为 SSE 行（audio + viseme 各带 seq）。
+
+    chunk: {"seq": int, "result": {"audio": {...}, "viseme": [...]} | None}
+    合成失败的句子（result=None）不产出行, 前端只少播一句, 不影响流程。
+    """
+    seq = chunk["seq"]
+    result = chunk["result"]
+    if result is None:
+        return []
+    audio = result["audio"]
+    return [
+        "event: audio\n",
+        f"data: {json.dumps({**audio, 'seq': seq}, ensure_ascii=False)}\n",
+        "\n",
+        "event: viseme\n",
+        f"data: {json.dumps({'frames': result['viseme'], 'seq': seq}, ensure_ascii=False)}\n",
+        "\n",
+    ]
+
+
+async def _store_chroma_async(session_id: str, user_text: str, assistant_text: str) -> None:
+    """Chroma 长期记忆写入 — 线程池执行, fire-and-forget, 不阻塞 done 发出。"""
+    try:
+        await asyncio.to_thread(chroma_memory.store_turn, session_id, user_text, assistant_text)
+    except Exception as e:
+        print(f"[Chroma] store_turn error: {e}")
 
 
 def _boundaries_to_char_durations(
@@ -251,13 +377,14 @@ class HitlConfirmRequest(BaseModel):
 
 @router.post("/api/chat")
 async def chat(req: ChatRequest):
-    """SSE streaming chat endpoint with TTS audio and viseme events.
+    """SSE streaming chat endpoint with sentence-chunked TTS + viseme events.
 
-    Returns text/event-stream with events:
-        emotion, token*, audio, viseme, done
+    token 流逐句切分: 每句文本一完整就入队后台合成（与后续 token 生成并行）,
+    合成完推送一对带 seq 的 audio/viseme 事件, 前端按序排队播放——实现
+    "边生成边说话"。done 在文本完成 + 记忆落库后立即发出, 不再等待最后
+    一句的 TTS 合成。
 
-    Every request gets a request_id (also returned as X-Request-Id header)
-    that threads through all agent-stage JSON logs for tracing.
+    Events: emotion, token*, audio*, viseme*, done | error, tool_request
     """
     request_id = uuid.uuid4().hex[:12]
     history = memory.get_history(req.session_id)
@@ -265,137 +392,98 @@ async def chat(req: ChatRequest):
     async def event_stream():
         full_reply = ""
         has_error = False
+        sentence_buffer = ""
+        seq_counter = 0
+
+        # 句文本 → 后台 worker 串行合成 → (seq, result) 进 out 队列
+        jobs: asyncio.Queue = asyncio.Queue()
+        out: asyncio.Queue = asyncio.Queue()
+
+        async def _tts_worker() -> None:
+            while True:
+                job = await jobs.get()
+                if job is None:
+                    out.put_nowait(None)  # worker 完成哨兵
+                    return
+                result = await _synthesize_chunk(job["seq"], job["text"])
+                out.put_nowait({"seq": job["seq"], "result": result})
+
+        worker = asyncio.create_task(_tts_worker())
+
+        async def _produce() -> None:
+            """代理 run_agent_stream: 过滤 token、切句入队合成, 其余事件直通。"""
+            nonlocal full_reply, has_error, sentence_buffer, seq_counter
+            try:
+                async for sse_event in run_agent_stream(req.text, history, request_id=request_id, use_cache=True):
+                    event = sse_event.event
+                    data = sse_event.data
+                    if event == "done":
+                        continue  # 本层在文本完成后统一发 done
+                    if event == "token":
+                        if not isinstance(data, dict):
+                            continue
+                        text = data.get("text", "")
+                        full_reply += text  # raw for memory
+                        clean = _clean_for_tts(text)
+                        if clean:
+                            out.put_nowait(SSEEvent(event="token", data={"text": clean}))
+                        # 句子分片: 完整句立即入队后台合成
+                        sentence_buffer += text
+                        sentences, sentence_buffer = _split_sentences(sentence_buffer)
+                        for s in sentences:
+                            clean_s = _clean_for_tts(s)
+                            if clean_s:
+                                jobs.put_nowait({"seq": seq_counter, "text": clean_s})
+                                seq_counter += 1
+                        continue
+                    if event == "error":
+                        has_error = True
+                    out.put_nowait(sse_event)
+            except Exception as exc:
+                has_error = True
+                out.put_nowait(SSEEvent(event="error", data={"message": str(exc), "code": 500}))
+            finally:
+                # 残句兜底: 无句末标点的回复整段作为最后一句
+                if not has_error and sentence_buffer.strip():
+                    clean_s = _clean_for_tts(sentence_buffer)
+                    if clean_s:
+                        jobs.put_nowait({"seq": seq_counter, "text": clean_s})
+                jobs.put_nowait(None)  # 结束合成队列
+                out.put_nowait(None)  # producer 完成哨兵
+
+        producer = asyncio.create_task(_produce())
+
+        # 双哨兵: producer 完成（文本流结束）+ worker 完成（所有句子合成完毕）
+        sentinels = 0
+        done_sent = False
         try:
-            async for sse_event in run_agent_stream(req.text, history, request_id=request_id, use_cache=True):
-                event = sse_event.event
-                data = sse_event.data
-
-                if event == "token":
-                    text = data.get("text", "")
-                    full_reply += text  # raw for memory
-                    # Strip action tags + emoji + symbols + sensitive patterns
-                    clean = _strip_action_tags(text)
-                    clean = _strip_emoji(clean)
-                    clean = _strip_symbols(clean)
-                    clean = _filter_sensitive(clean)
-                    if clean:
-                        yield "event: token\n"
-                        yield f"data: {json.dumps({'text': clean}, ensure_ascii=False)}\n"
-                        yield "\n"
+            while sentinels < 2:
+                item = await out.get()
+                if item is None:
+                    sentinels += 1
+                    # 文本流完成: 落库 + 提前发 done（剩余 TTS 仍在后台合成）
+                    if sentinels == 1 and not done_sent:
+                        if not has_error:
+                            memory.add_user_message(req.session_id, req.text)
+                            if full_reply.strip():
+                                memory.add_assistant_message(req.session_id, full_reply)
+                                _ = asyncio.create_task(_store_chroma_async(req.session_id, req.text, full_reply))
+                            yield "event: done\n"
+                            yield "data: {}\n"
+                            yield "\n"
+                            done_sent = True
                     continue
-
-                # Intercept "done" from emotional_agent — we send it later
-                # after TTS audio + viseme events
-                if event == "done":
-                    continue
-
-                if event == "error":
-                    has_error = True
-
-                yield f"event: {event}\n"
-                yield f"data: {json.dumps(data, ensure_ascii=False)}\n"
-                yield "\n"
-
-            # ---- Phase 2: TTS + Viseme after LLM reply is complete ----
-            if not has_error and full_reply.strip():
-                try:
-                    # Strip non-speakable content: emoji, action tags, symbols, sensitive
-                    tts_text = _strip_emoji(full_reply)
-                    tts_text = _strip_action_tags(tts_text)
-                    tts_text = _strip_symbols(tts_text)
-                    tts_text = _filter_sensitive(tts_text)
-                    if not tts_text:
-                        tts_text = full_reply  # fallback if everything was stripped
-
-                    # Synthesize: Edge TTS (neural, online) → pyttsx3 (offline fallback).
-                    # Edge TTS returns (MP3 bytes, word_boundaries), pyttsx3 returns
-                    # (WAV bytes, []) — we detect format from boundary presence.
-                    audio_bytes, word_boundaries = await synthesize_with_word_boundary(tts_text)
-                    audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
-
-                    has_boundaries = len(word_boundaries) > 0
-                    audio_fmt = "mp3" if has_boundaries else "wav"
-
-                    # Calculate precise audio duration.
-                    if has_boundaries:
-                        # Edge TTS MP3: use boundaries for word-level precision,
-                        # fall back to MP3 frame scanning (more accurate than byte-size estimate).
-                        last = word_boundaries[-1]
-                        boundary_ms = int((last["offset"] + last["duration"]) / 10000)
-                        mp3_frame_ms = _mp3_duration(audio_bytes)
-                        # Take the larger of the two (boundaries can miss trailing silence)
-                        audio_duration_ms = max(boundary_ms, mp3_frame_ms)
-                    else:
-                        # pyttsx3 WAV: parse from header
-                        audio_duration_ms = _wav_duration(audio_bytes)
-
-                    # Build per-character durations from Edge TTS word boundaries.
-                    # Uses len(wb_text) for ALL characters in the boundary word (including
-                    # punctuation) — this matches tts_text character count exactly because
-                    # Edge TTS processes the same text.
-                    char_durations: list[float] | None = None
-                    if has_boundaries:
-                        char_durations = _boundaries_to_char_durations(word_boundaries)
-
-                    # Fallback ms_per_char for pyttsx3 (no boundaries)
-                    cjk_count = sum(1 for ch in tts_text if "一" <= ch <= "鿿")
-                    non_cjk_count = len(tts_text) - cjk_count
-                    total_speak_ms = audio_duration_ms - non_cjk_count * 80
-                    ms_per_char = (
-                        max(total_speak_ms / cjk_count, 20.0) if (cjk_count > 0 and total_speak_ms > 0) else 30.0
-                    )
-
-                    print(
-                        f"[TTS] format={audio_fmt}, duration={audio_duration_ms}ms, "
-                        f"bytes={len(audio_bytes)}, text_len={len(tts_text)}, "
-                        f"boundaries={len(word_boundaries)}, "
-                        f"char_dur_len={len(char_durations) if char_durations else 0}, "
-                        f"ms_per_char={ms_per_char:.1f}"
-                    )
-
-                    yield "event: audio\n"
-                    yield f"data: {json.dumps({'base64': audio_b64, 'format': audio_fmt, 'duration_ms': audio_duration_ms}, ensure_ascii=False)}\n"
+                if isinstance(item, SSEEvent):
+                    yield f"event: {item.event}\n"
+                    yield f"data: {json.dumps(item.data, ensure_ascii=False)}\n"
                     yield "\n"
-
-                    # Generate viseme sequence with word-boundary timing when available,
-                    # otherwise uniform per-character distribution.
-                    viseme_seq = text_to_viseme_sequence(
-                        tts_text,
-                        ms_per_char=ms_per_char,
-                        char_durations=char_durations,
-                    )
-                    if viseme_seq and audio_duration_ms > 0:
-                        raw_last_ms = viseme_seq[-1]["time_ms"]
-                        if raw_last_ms > 0:
-                            scale = audio_duration_ms / raw_last_ms
-                            for v in viseme_seq:
-                                v["time_ms"] = round(v["time_ms"] * scale, 1)
-
-                    yield "event: viseme\n"
-                    yield f"data: {json.dumps(viseme_seq, ensure_ascii=False)}\n"
-                    yield "\n"
-                except Exception as tts_err:
-                    # TTS failure is non-fatal; conversation continues
-                    print(f"[TTS] synthesis failed: {tts_err}")
-
-            # Save to short-term memory
-            memory.add_user_message(req.session_id, req.text)
-            if full_reply.strip():
-                memory.add_assistant_message(req.session_id, full_reply)
-                # Also store in Chroma long-term memory (fire-and-forget)
-                try:
-                    chroma_memory.store_turn(req.session_id, req.text, full_reply)
-                except Exception as e:
-                    print(f"[Chroma] store_turn error: {e}")
-
-            yield "event: done\n"
-            yield "data: {}\n"
-            yield "\n"
-
-        except Exception as exc:
-            yield "event: error\n"
-            yield f"data: {json.dumps({'message': str(exc), 'code': 500}, ensure_ascii=False)}\n"
-            yield "\n"
+                else:
+                    # TTS 分片结果 → audio + viseme
+                    for line in _format_tts_chunk(item):
+                        yield line
+        finally:
+            producer.cancel()
+            worker.cancel()
 
     return StreamingResponse(
         event_stream(),

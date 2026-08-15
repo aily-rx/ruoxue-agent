@@ -16,11 +16,22 @@ export interface ToolRequest {
   timeoutS?: number;
 }
 
+export interface VisemeFrame {
+  time_ms: number;
+  A: number;
+  I: number;
+  U: number;
+  E: number;
+  O: number;
+}
+
 export interface ChatClientCallbacks {
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
-  onAudio?: (base64: string, format: string, durationMs: number) => void;
-  onViseme?: (visemes: Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>) => void;
+  /** 分片音频: seq 为句子序号, 前端按序排队播放 */
+  onAudio?: (base64: string, format: string, durationMs: number, seq: number) => void;
+  /** 分片口型帧: 与同 seq 的 audio 配对, 播放开始时驱动嘴型 */
+  onViseme?: (frames: VisemeFrame[], seq: number) => void;
   onToolRequest?: (request: ToolRequest) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
@@ -97,10 +108,11 @@ function dispatch(
         d.base64 as string,
         (d.format as string) || "mp3",
         (d.duration_ms as number) || 0,
+        (d.seq as number) ?? 0,
       );
       break;
     case "viseme":
-      cb.onViseme?.(data as Array<{ time_ms: number; A: number; I: number; U: number; E: number; O: number }>);
+      cb.onViseme?.((d.frames as VisemeFrame[]) || [], (d.seq as number) ?? 0);
       break;
     case "tool_request":
       cb.onToolRequest?.({

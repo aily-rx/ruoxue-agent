@@ -30,6 +30,13 @@ try:
     HAS_RAGAS = True
 except ImportError:
     HAS_RAGAS = False
+    # 兜底名字: 未装 ragas 时 import 本模块仍须成功,
+    # 由各测试的 pytestmark skipif(not HAS_RAGAS) 负责跳过
+    BaseRagasEmbedding = None  # type: ignore[assignment]
+    llm_factory = None  # type: ignore[assignment]
+    AnswerRelevancy = None  # type: ignore[assignment]
+    ContextPrecision = None  # type: ignore[assignment]
+    Faithfulness = None  # type: ignore[assignment]
 
 
 __all__ = [

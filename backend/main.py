@@ -38,6 +38,16 @@ async def lifespan(app: FastAPI):
         print(f"[Ruoxue] WARNING: ASR model not loaded: {exc}")
         print("[Ruoxue] Text chat will still work; voice features disabled.")
 
+    # Phase 4: warm up the shared LLM client — ChatOpenAI 构造在 Windows 上
+    # 实测约 5s, 若留到首个请求懒加载, 首请求 TTFT 会白付冷启动
+    try:
+        from backend.agent.agent_graph import warmup_llm
+
+        warmup_llm()
+        print("[Ruoxue] LLM client warmed up")
+    except Exception as exc:
+        print(f"[Ruoxue] WARNING: LLM warmup failed: {exc}")
+
     yield
     print("[Ruoxue] Server shutting down...")
 

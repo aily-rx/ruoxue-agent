@@ -62,18 +62,20 @@ _JUDGE_MAX_TOKENS = 8192  # ragas 结构化输出 JSON 默认 1024 会被截断�
 _EVAL_LIMIT = int(os.getenv("RAGAS_LIMIT", "20"))
 
 
-class BgeRagasEmbedding(BaseRagasEmbedding):
-    """复用项目本地 bge-small-zh-v1.5 的 ragas embedding 适配器。
+if HAS_RAGAS:
 
-    不引入 sentence-transformers 依赖——直接走 rag_service._embed 的
-    现有 transformers 实现（CLS pooling + L2 归一化）。
-    """
+    class BgeRagasEmbedding(BaseRagasEmbedding):
+        """复用项目本地 bge-small-zh-v1.5 的 ragas embedding 适配器。
 
-    def embed_text(self, text: str, **kwargs) -> list[float]:
-        return [float(x) for x in _embed([text])[0]]
+        不引入 sentence-transformers 依赖——直接走 rag_service._embed 的
+        现有 transformers 实现（CLS pooling + L2 归一化）。
+        """
 
-    async def aembed_text(self, text: str, **kwargs) -> list[float]:
-        return self.embed_text(text)
+        def embed_text(self, text: str, **kwargs) -> list[float]:
+            return [float(x) for x in _embed([text])[0]]
+
+        async def aembed_text(self, text: str, **kwargs) -> list[float]:
+            return self.embed_text(text)
 
 
 def _build_metrics(judge, embeddings) -> list:

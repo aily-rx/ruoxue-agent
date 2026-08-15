@@ -20,7 +20,12 @@ interface PanelProps {
 
 export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   const audioRef = useRef<AudioManager | null>(null);
-  const pendingRef = useRef<{ base64?: string; visemes?: VisemeFrame[]; durationMs?: number }>({});
+  // 分片音频队列: 后端按句子逐片推送 audio/viseme(带 seq), 前端按序排队播放
+  const queueRef = useRef<Array<{ seq: number; b64: string; visemes: VisemeFrame[] | null; durationMs: number }>>([]);
+  const playingRef = useRef(false);
+  const doneRef = useRef(false);
+  // viseme 先于 audio 到达时的暂存（同 seq 配对, 常规顺序下用不到）
+  const pendingVisemesRef = useRef<Map<number, VisemeFrame[]>>(new Map());
   const updateRef = useRef(onLive2DUpdate);
   updateRef.current = onLive2DUpdate;
 
@@ -68,47 +73,45 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
   }, [live2dRef]);
 
   /**
-   * Play TTS audio. When viseme data is available, lip-sync starts exactly when
-   * audio playback begins (via onPlayStarted callback), eliminating the timing gap
-   * between async audio decode and the LipSyncDriver's independent timer.
+   * 播放队列队首分片。onPlayStarted 时读取该片最新 viseme（decode 期间
+   * viseme 可能才到达）, 保证嘴型与音频起点精确对齐。
    */
-  const playAudio = useCallback((
-    b64: string,
-    visemes?: VisemeFrame[],
-    durationMs?: number,
-  ) => {
+  const playNextChunk = useCallback(() => {
+    if (playingRef.current) return;
+    const item = queueRef.current[0];
+    if (!item) {
+      // 队列已空且 done 已到 → 全部播完, 恢复待机表情与 idle motion
+      if (doneRef.current) scheduleEmotionReset();
+      return;
+    }
     if (!audioRef.current) audioRef.current = new AudioManager();
-    audioRef.current.stop();
-
-    // Capture performance.now() at the exact moment AudioContext starts playback.
-    // This bridges the Web Audio timeline and the render loop's rAF timer,
-    // ensuring viseme frames are evaluated against real audio progress.
-    const onPlayStarted = visemes && visemes.length > 0
-      ? function(_ctxTime: number) {
-          const startTime = performance.now();
-          live2dRef?.current?.startLipSync(visemes, durationMs ?? 0, startTime);
-        }
-      : undefined;
-
-    audioRef.current.playBase64(b64, scheduleEmotionReset, onPlayStarted).catch(function(e: Error) {
+    playingRef.current = true;
+    const onPlayStarted = function() {
+      const v = item.visemes;
+      if (v && v.length > 0) {
+        live2dRef?.current?.startLipSync(v, item.durationMs, performance.now());
+      }
+    };
+    const onPlayEnded = function() {
+      queueRef.current.shift();
+      playingRef.current = false;
+      playNextChunk();
+    };
+    audioRef.current.playBase64(item.b64, onPlayEnded, onPlayStarted).catch(function(e: Error) {
       console.error("Audio:", e);
+      // 解码/播放失败也出队继续下一片, 避免队列卡死
+      queueRef.current.shift();
+      playingRef.current = false;
+      playNextChunk();
     });
   }, [scheduleEmotionReset, live2dRef]);
 
-  const flushPending = useCallback(() => {
-    const p = pendingRef.current;
-    if (p.base64 && p.visemes) {
-      const b64 = p.base64, v = p.visemes, d = p.durationMs ?? 0;
-      pendingRef.current = {};
-      playAudio(b64, v, d);
-    }
-  }, [playAudio]);
-
-  const handleAudio = useCallback((base64: string, _f: string, durationMs: number) => {
-    pendingRef.current.base64 = base64;
-    pendingRef.current.durationMs = durationMs;
-    flushPending();
-  }, [flushPending]);
+  const handleAudio = useCallback((base64: string, _f: string, durationMs: number, seq: number) => {
+    const visemes = pendingVisemesRef.current.get(seq) ?? null;
+    pendingVisemesRef.current.delete(seq);
+    queueRef.current.push({ seq, b64: base64, visemes, durationMs });
+    playNextChunk();
+  }, [playNextChunk]);
 
   const handleEmotion = useCallback((emotion: string, intensity: number) => {
     emotionRef.current = emotion;  // capture for motion detection
@@ -120,21 +123,24 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
     detectMotion();  // checks userMessageRef, fires once per reply
   }, []);
 
-  const handleViseme = useCallback((visemes: VisemeFrame[]) => {
-    pendingRef.current.visemes = visemes;
-    flushPending();
-  }, [flushPending]);
+  const handleViseme = useCallback((frames: VisemeFrame[], seq: number) => {
+    const existing = queueRef.current.find((c) => c.seq === seq);
+    if (existing) {
+      existing.visemes = frames;
+    } else {
+      pendingVisemesRef.current.set(seq, frames);
+    }
+  }, []);
 
   const handleDone = useCallback(() => {
     // 流结束（含 HITL 超时自动拒绝后）→ 确认条必须消失, 否则残留挂起
     setPendingTool(null);
-    const p = pendingRef.current;
-    if (p.base64 && !p.visemes) {
-      // Audio arrived without visemes — play it (reset handled by audio onended)
-      playAudio(p.base64);
+    doneRef.current = true;
+    // 无音频场景（TTS 全部失败/错误中断）→ 直接恢复待机
+    if (!playingRef.current && queueRef.current.length === 0) {
+      scheduleEmotionReset();
     }
-    pendingRef.current = {};
-  }, [playAudio]);
+  }, [scheduleEmotionReset]);
 
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -174,7 +180,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
 
   const handleSend = useCallback(() => {
     if (!input.trim() || isLoading) return;
-    pendingRef.current = {};
+    queueRef.current = [];
+    playingRef.current = false;
+    doneRef.current = false;
+    pendingVisemesRef.current.clear();
     audioRef.current?.stop();
     if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
     // Store user message for motion detection, then reset motion state
@@ -192,7 +201,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
 
   const handleVoiceRecognized = useCallback(
     (text: string) => {
-      pendingRef.current = {};
+      queueRef.current = [];
+      playingRef.current = false;
+      doneRef.current = false;
+      pendingVisemesRef.current.clear();
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
       userMessageRef.current = text.trim();
@@ -217,6 +229,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
 
   const handleQuickReply = useCallback(
     (text: string) => {
+      queueRef.current = [];
+      playingRef.current = false;
+      doneRef.current = false;
+      pendingVisemesRef.current.clear();
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
       userMessageRef.current = text.trim();
@@ -242,7 +258,10 @@ export function ChatPanel({ onLive2DUpdate, live2dRef }: PanelProps) {
       const data = await resp.json();
       // Auto-send message asking agent to read the uploaded file
       const msg = `请帮我查看这个文件：${data.path}`;
-      pendingRef.current = {};
+      queueRef.current = [];
+      playingRef.current = false;
+      doneRef.current = false;
+      pendingVisemesRef.current.clear();
       audioRef.current?.stop();
       if (resetTimeoutRef.current) { clearTimeout(resetTimeoutRef.current); resetTimeoutRef.current = null; }
       userMessageRef.current = msg;

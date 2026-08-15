@@ -64,6 +64,11 @@ in this exact format: [EMOTION: <emotion>|<intensity>]
 Available emotions: happy, sad, angry, surprised, neutral, thoughtful, worried, excited
 Intensity: a number from 0.0 to 1.0 (e.g. 0.5 for moderate, 0.8 for strong)
 
+CRITICAL streaming rule: the complete emotion tag MUST be emitted fully formed
+as the very FIRST thing you output — the first chunk of your stream must already
+contain the entire tag, with no leading spaces, newlines, filler or thinking text
+before it. Do NOT break the tag across multiple chunks.
+
 Then write your reply text immediately after the tag with NO line break.
 
 Emotion selection guide:

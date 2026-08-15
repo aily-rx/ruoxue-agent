@@ -32,10 +32,10 @@ function genId(): string {
 }
 
 export interface UseChatOptions {
-  onAudio?: (base64: string, format: string, durationMs: number) => void;
+  onAudio?: (base64: string, format: string, durationMs: number, seq: number) => void;
   onEmotion?: (emotion: string, intensity: number) => void;
   onToken?: (text: string) => void;
-  onViseme?: (visemes: VisemeFrame[]) => void;
+  onViseme?: (frames: VisemeFrame[], seq: number) => void;
   onToolRequest?: (request: ToolRequest) => void;
   onDone?: () => void;
 }
@@ -114,16 +114,18 @@ export function useChat(options: UseChatOptions = {}) {
               );
               onTokenRef.current?.(token);
             },
-            onAudio(base64, format, durationMs) {
-              onAudioRef.current?.(base64, format, durationMs);
+            onAudio(base64, format, durationMs, seq) {
+              onAudioRef.current?.(base64, format, durationMs, seq);
             },
-            onViseme(visemes) {
+            onViseme(frames, seq) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, visemes } : m,
+                  m.id === assistantId
+                    ? { ...m, visemes: [...(m.visemes ?? []), ...frames] }
+                    : m,
                 ),
               );
-              onVisemeRef.current?.(visemes);
+              onVisemeRef.current?.(frames, seq);
             },
             onToolRequest(request) {
               onToolRequestRef.current?.(request);

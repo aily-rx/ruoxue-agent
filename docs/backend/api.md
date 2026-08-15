@@ -36,12 +36,20 @@ data: {"text":"天气"}
 event: token
 data: {"text":"不错！"}
 
+# —— 分片 TTS: 每句文本完成后即合成推送（与后续 token 生成并行）——
 event: audio
-data: {"base64":"//uQxAAAA...","format":"mp3","duration_ms":2800}
+data: {"base64":"//uQxAAAA...","format":"mp3","duration_ms":2800,"seq":0}
 
 event: viseme
-data: [{"time_ms":0,"level":2},{"time_ms":120,"level":3},{"time_ms":300,"level":2},{"time_ms":450,"level":0}]
+data: {"frames":[{"time_ms":0,"A":0.5,"I":0.2,"U":0,"E":0.1,"O":0.1}, ...],"seq":0}
 
+event: audio
+data: {"base64":"//uQxBBBB...","format":"mp3","duration_ms":1900,"seq":1}
+
+event: viseme
+data: {"frames":[...],"seq":1}
+
+# done 在文本完成 + 记忆落库后立即发出（不再等最后一句 TTS）
 event: done
 data: {}
 ```
@@ -52,9 +60,13 @@ data: {}
 |------|------|------|
 | emotion | {emotion, intensity} | 情绪标签 + 强度 (0.0-1.0) |
 | token | {text} | 逐字文本 |
-| audio | {base64, format, duration_ms} | MP3 音频 (base64) |
-| viseme | [{time_ms, level}] | 嘴型时间轴 (level: 0-4) |
-| done | {} | 流结束 |
+| audio | {base64, format, duration_ms, seq} | 单句音频 (base64), seq 为句子序号, 前端按序排队播放 |
+| viseme | {frames, seq} | 单句嘴型时间轴, 与同 seq 的 audio 配对 |
+| done | {} | 文本流结束（音频可能仍在流式推送中） |
+| tool_request | {request_id, tool_calls, timeout_s} | HITL 工具确认请求（HITL_ENABLED=true 时） |
+
+**分片规则:** 按句末标点（。！？!?；;…）切句; 残句超 40 字且模型漏标点时在最近逗号处兜底强切。
+**viseme frame:** {time_ms, A, I, U, E, O} — 5 口型参数（0.0-1.0）, 与同 seq 音频时长对齐。
 
 **情绪枚举值:** happy / sad / angry / surprised / neutral / thoughtful / worried / excited
 
@@ -63,6 +75,9 @@ data: {}
 event: error
 data: {"message":"LLM 服务不可用","code":503}
 ```
+
+> 兼容性说明: 旧协议（整段 audio/viseme 不带 seq、done 在最后）已被替换;
+> 旧前端收到带 seq 的 audio/viseme 会解析失败, 需与后端同步升级。
 
 ---
 

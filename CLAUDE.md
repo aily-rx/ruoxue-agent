@@ -186,15 +186,14 @@ App
 
 ```
 用户输入 → POST /api/chat (SSE)
-  → emotional_agent.py:
+  → agent_graph.run_agent_stream:
     1. LLM 流式生成回复（含 [EMOTION: xxx|0.0] 前缀标签）
     2. 解析情绪标签 → SSE: event:emotion
     3. 逐 token 推送 → SSE: event:token*（routes.py 做 emoji/动作标签/符号过滤）
-    4. LLM 完成后 → TTS 合成（WordBoundary 模式）→ SSE: event:audio
-    5. Viseme 序列生成 + 时长缩放 → SSE: event:viseme
-    6. 完成 → SSE: event:done
-  → 前端 ChatClient 解析 event stream → useChat 更新 messages[]
-  → ChatPanel 回调链：onEmotion→App.setState, onAudio→AudioManager, onViseme→Live2DCanvas
+  → routes.py 逐句切分（句末标点; 残句>40字在逗号处兜底强切）→ 后台串行合成
+    每句: Edge TTS(WordBoundary) → audio(seq) + viseme(seq) 逐片推送,
+    与后续 token 生成并行 —— 首句音频距首字 ~1.5s
+    4. 文本完成 + 记忆落库 → SSE: event:done（不等最后一句 TTS）
 ```
 
 ### SSE 事件协议
@@ -202,9 +201,10 @@ App
 ```
 event: emotion    data: {"emotion":"happy","intensity":0.8}
 event: token      data: {"text":"你好！"}
-event: audio      data: {"base64":"...","format":"mp3","duration_ms":3200}
-event: viseme     data: [{"time_ms":0,"A":0.95,"I":0,"U":0,"E":0,"O":0.25}, ...]
-event: done       data: {}
+event: audio      data: {"base64":"...","format":"mp3","duration_ms":3200,"seq":0}
+event: viseme     data: {"frames":[{"time_ms":0,"A":0.95,...}, ...],"seq":0}
+event: done       data: {}          # 文本完成即发, 音频可能在其后继续流
+event: tool_request data: {"request_id":"...","tool_calls":[...],"timeout_s":60}  # HITL 开启时
 event: error      data: {"message":"...","code":500}
 ```
 
