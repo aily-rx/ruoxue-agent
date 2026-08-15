@@ -7,12 +7,15 @@ context for each new query.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import chromadb
 from chromadb.utils import embedding_functions
+
+_logger = logging.getLogger("agent.chroma_memory")
 
 # ---------------------------------------------------------------------------
 # ChromaMemory — singleton service
@@ -63,7 +66,7 @@ class ChromaMemory:
                 ids=[turn_id],
             )
         except Exception as exc:
-            print(f"[Chroma] store failed: {exc}")
+            _logger.warning("chroma store failed", extra={"error": str(exc)})
 
     # ------------------------------------------------------------------
     # Read
@@ -90,7 +93,7 @@ class ChromaMemory:
                 include=["documents", "metadatas", "distances"],
             )
         except Exception as exc:
-            print(f"[Chroma] query failed: {exc}")
+            _logger.warning("chroma query failed", extra={"error": str(exc)})
             return ""
 
         docs = results.get("documents")

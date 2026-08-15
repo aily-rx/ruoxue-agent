@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import logging
 import os
 import tempfile
 from io import BytesIO
 
 import edge_tts
 from backend.config import TTS_PROXY, TTS_VOICE
+
+_logger = logging.getLogger("tts.service")
 
 # ── Edge TTS (primary) ──────────────────────────────────────────────
 
@@ -149,12 +152,12 @@ async def synthesize(
     """
     try:
         audio = await _synthesize_edge(text, voice=voice)
-        print(f"[TTS] Edge TTS OK, {len(audio)} bytes")
+        _logger.info("edge tts ok", extra={"bytes": len(audio)})
         return audio
     except Exception as edge_err:
-        print(f"[TTS] Edge TTS failed ({edge_err}), falling back to offline SAPI5")
+        _logger.warning("edge tts failed, falling back to offline SAPI5", extra={"error": str(edge_err)})
         audio = await _synthesize_sapi5_async(text)
-        print(f"[TTS] Offline SAPI5 OK, {len(audio)} bytes")
+        _logger.info("offline SAPI5 ok", extra={"bytes": len(audio)})
         return audio
 
 
@@ -176,10 +179,10 @@ async def synthesize_with_word_boundary(
             text,
             voice=voice,
         )
-        print(f"[TTS] Edge TTS OK, {len(audio)} bytes, {len(boundaries)} boundaries")
+        _logger.info("edge tts ok", extra={"bytes": len(audio), "boundaries": len(boundaries)})
         return audio, boundaries
     except Exception as edge_err:
-        print(f"[TTS] Edge TTS failed ({edge_err}), falling back to offline SAPI5")
+        _logger.warning("edge tts failed, falling back to offline SAPI5", extra={"error": str(edge_err)})
         audio = await _synthesize_sapi5_async(text)
-        print(f"[TTS] Offline SAPI5 OK, {len(audio)} bytes, no boundaries")
+        _logger.info("offline SAPI5 ok", extra={"bytes": len(audio), "boundaries": 0})
         return audio, []

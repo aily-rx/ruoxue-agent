@@ -139,6 +139,24 @@ def warmup_llm() -> None:
     _build_llm()
 
 
+async def ping_llm(timeout: float = 2.5) -> bool:
+    """轻量探测 LLM 可用性（/api/health 用, 结果缓存由 routes 层负责）。
+
+    未配置 API key 直接判不可用, 不发网络请求; 已配置则发一个 max_tokens=1
+    的 ping, 带超时防 health 端点被拖死。
+    """
+    if DEEPSEEK_API_KEY in ("", "your-api-key-here"):
+        return False
+    try:
+        await asyncio.wait_for(
+            _build_llm().ainvoke([HumanMessage(content="ping")], max_tokens=1),
+            timeout=timeout,
+        )
+        return True
+    except Exception:
+        return False
+
+
 # --- 回复缓存（LRU + TTL, 纯标准库）---
 
 
@@ -371,7 +389,6 @@ async def run_agent_stream(
     )
     if chroma_hits:
         memory_context += chroma_hits
-        print(f"[Chroma] retrieved context ({len(chroma_hits)} chars)")
     else:
         memory_context = ""  # skip if nothing relevant
 
@@ -385,7 +402,6 @@ async def run_agent_stream(
             skill_context = (
                 f"[技能指令 — {skill_name}]\n以下是适用于当前任务的专项指令，请严格遵循：\n\n{skill_content}"
             )
-            print(f"[Skill] matched '{skill_name}' for input: {user_text[:50]}...")
 
     # --- Build LangChain messages from short-term history ---
     lc_messages: list[BaseMessage] = []

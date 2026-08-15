@@ -13,6 +13,7 @@ BM25 alone misses paraphrases. RRF merges both rank lists robustly.
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,6 +23,8 @@ import numpy as np
 from backend.config import RAG_BM25_K, RAG_TOP_K, RAG_VECTOR_K
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from rank_bm25 import BM25Okapi
+
+_logger = logging.getLogger("agent.rag_service")
 
 # ---------------------------------------------------------------------------
 # Embedding — bge-small-zh-v1.5 (Chinese) with all-MiniLM-L6-v2 fallback
@@ -269,7 +272,7 @@ class KnowledgeBase:
         self._build_bm25()
         self._save()
 
-        print(f"[RAG] FAISS indexed {len(all_chunks)} chunks from {len(files)} files")
+        _logger.info("faiss indexed", extra={"chunks": len(all_chunks), "files": len(files)})
         return len(all_chunks)
 
     # ------------------------------------------------------------------

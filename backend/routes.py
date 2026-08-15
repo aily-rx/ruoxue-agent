@@ -8,11 +8,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
+import time
 import uuid
 from pathlib import Path
 
-from backend.agent.agent_graph import run_agent_stream
+from backend.agent.agent_graph import ping_llm, run_agent_stream
 from backend.agent.chroma_memory import chroma_memory
 from backend.agent.emotional_agent import SSEEvent
 from backend.agent.memory import memory
@@ -24,6 +26,23 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+_logger = logging.getLogger("routes")
+
+# LLM 健康探测缓存: 探测要发真实请求, TTL 内复用结果避免每次 /api/health 都打 API
+_LLM_HEALTH_TTL_S = 60.0
+_llm_health_cache: tuple[float, bool] | None = None
+
+
+async def _check_llm_available() -> bool:
+    """LLM 可用性探测（带 60s 结果缓存, 首次调用最多阻塞 2.5s）。"""
+    global _llm_health_cache
+    now = time.monotonic()
+    if _llm_health_cache is not None and now - _llm_health_cache[0] < _LLM_HEALTH_TTL_S:
+        return _llm_health_cache[1]
+    ok = await ping_llm(timeout=2.5)
+    _llm_health_cache = (now, ok)
+    return ok
 
 
 # --- Helpers ---
@@ -159,7 +178,7 @@ async def _synthesize_chunk(seq: int, text: str) -> dict | None:
     try:
         audio_bytes, word_boundaries = await synthesize_with_word_boundary(text)
     except Exception as exc:
-        print(f"[TTS] chunk {seq} synthesis failed: {exc}")
+        _logger.warning("tts chunk synthesis failed", extra={"seq": seq, "error": str(exc)})
         return None
 
     audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
@@ -226,7 +245,7 @@ async def _store_chroma_async(session_id: str, user_text: str, assistant_text: s
     try:
         await asyncio.to_thread(chroma_memory.store_turn, session_id, user_text, assistant_text)
     except Exception as e:
-        print(f"[Chroma] store_turn error: {e}")
+        _logger.warning("chroma store_turn failed", extra={"error": str(e)})
 
 
 def _boundaries_to_char_durations(
@@ -577,10 +596,10 @@ async def upload_file(file: UploadFile = File(...)):
 
 @router.get("/api/health", response_model=HealthResponse)
 async def health():
-    """Health check endpoint with ASR status."""
+    """Health check endpoint — ASR 状态 + LLM 真实探测（60s 缓存）。"""
     return HealthResponse(
         status="ok",
         version="0.2.0",
-        llm_available=True,
+        llm_available=await _check_llm_available(),
         asr_available=asr_service.is_loaded,
     )

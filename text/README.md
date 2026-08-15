@@ -37,3 +37,4 @@
 | `retrospective/短板7-安全与Prompt注入防护补全过程复盘.md` | retrospective | 白名单沙箱/防注入隔离/输出护栏补全过程复盘（7 短板收官） | 2026-08-14 |
 | `retrospective/收尾1-评估集扩充与评估方法学验证复盘.md` | retrospective | 评估集 20→50 题（0.95→0.78 修正）+ 真实链路对照推翻"合成=下限"假设 | 2026-08-14 |
 | `retrospective/收尾2-Human-in-the-loop复盘.md` | retrospective | LangGraph interrupt 工具确认闭环（三个时序坑/测试设计） | 2026-08-14 |
+| `retrospective/收尾3-项目优化项审查与P0处置复盘.md` | retrospective | 全项目优化项审查（14 项分级）+ P0 处置：工具按需绑定实测推翻/健康检查真实化/print→logger | 2026-08-15 |

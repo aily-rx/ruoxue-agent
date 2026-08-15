@@ -5,6 +5,7 @@ FastAPI application serving the AI Agent API.
 
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,11 +24,13 @@ from fastapi.middleware.cors import CORSMiddleware
 # Initialize structured logging (JSON lines to stdout)
 setup_logging()
 
+_logger = logging.getLogger("main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    print("[Ruoxue] Server starting...")
+    _logger.info("server starting")
 
     # Phase 2: preload ASR model at startup
     try:
@@ -35,8 +38,7 @@ async def lifespan(app: FastAPI):
 
         asr_service.load_model()
     except Exception as exc:
-        print(f"[Ruoxue] WARNING: ASR model not loaded: {exc}")
-        print("[Ruoxue] Text chat will still work; voice features disabled.")
+        _logger.warning("asr model load failed, voice features disabled", extra={"error": str(exc)})
 
     # Phase 4: warm up the shared LLM client — ChatOpenAI 构造在 Windows 上
     # 实测约 5s, 若留到首个请求懒加载, 首请求 TTFT 会白付冷启动
@@ -44,12 +46,12 @@ async def lifespan(app: FastAPI):
         from backend.agent.agent_graph import warmup_llm
 
         warmup_llm()
-        print("[Ruoxue] LLM client warmed up")
+        _logger.info("llm client warmed up")
     except Exception as exc:
-        print(f"[Ruoxue] WARNING: LLM warmup failed: {exc}")
+        _logger.warning("llm warmup failed", extra={"error": str(exc)})
 
     yield
-    print("[Ruoxue] Server shutting down...")
+    _logger.info("server shutting down")
 
 
 app = FastAPI(
