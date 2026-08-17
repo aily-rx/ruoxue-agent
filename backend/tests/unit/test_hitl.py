@@ -11,9 +11,12 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
 import pytest
 from backend.agent.agent_graph import confirm_tool_call, run_agent_stream
-from backend.tests.unit.test_agent_stream import FakeChromaMemory, FakeSkillLoader
+from backend.agent.emotional_agent import SSEEvent
+from backend.tests.unit.test_agent_stream import FakeChromaMemory, FakeSkillLoader, _d
 from langchain_core.messages import AIMessage
 
 _TOOL_REPLY = AIMessage(
@@ -61,7 +64,7 @@ def _patch_env(monkeypatch, llm: ScriptedLLM, tavily: FakeTavily, hitl_on: bool 
 
 async def _consume_until_tool_request(
     monkeypatch, llm, tavily, rid: str = "hitl-approve", hitl_on: bool = True
-) -> tuple[list, object]:
+) -> tuple[list, AsyncGenerator[SSEEvent, None]]:
     """消费到 tool_request 事件为止, 返回 (已消费事件, 挂起的 generator)。
 
     generator 此刻正挂起在确认等待（future 已注册）—— 调 confirm_tool_call 后
@@ -110,7 +113,7 @@ async def test_approved_executes_tool(monkeypatch) -> None:
         events.append(ev)
 
     assert tavily.search_calls == ["测试"], "允许后工具必须执行"
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert "已经处理完了" in "".join(texts)
     assert [ev.event for ev in events][-1] == "done"
 
@@ -127,7 +130,7 @@ async def test_rejected_skips_tool(monkeypatch) -> None:
         events.append(ev)
 
     assert tavily.search_calls == [], "拒绝后工具不得执行"
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert "已经处理完了" in "".join(texts)  # 第二轮 LLM 照常回复
 
 
@@ -166,5 +169,5 @@ async def test_hitl_disabled_runs_tool_without_confirm(monkeypatch) -> None:
 
     assert not any(ev.event == "tool_request" for ev in events)
     assert tavily.search_calls == ["测试"], "HITL 关闭时工具直接执行"
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert "已经处理完了" in "".join(texts)

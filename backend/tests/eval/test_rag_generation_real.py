@@ -63,7 +63,9 @@ async def test_real_chain_faithfulness_scorable() -> None:
         tokens: list[str] = []
         async for ev in run_agent_stream(question, history=[], request_id="real-eval"):
             if ev.event == "token":
-                tokens.append(str(ev.data.get("text", "")))
+                data = ev.data
+                assert isinstance(data, dict)
+                tokens.append(str(data.get("text", "")))
         answer = "".join(tokens).strip()
         assert answer, f"真实链路无回复: {question}"
 

@@ -51,6 +51,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -186,7 +187,7 @@ def _log_retry_sleep(retry_state: RetryCallState) -> None:
         "llm call retry",
         extra={
             "attempt": retry_state.attempt_number,
-            "error": str(retry_state.outcome.exception()),
+            "error": str(retry_state.outcome.exception()) if retry_state.outcome else "unknown",
         },
     )
 
@@ -490,8 +491,8 @@ async def run_agent_stream(
                 yield SSEEvent(event="token", data={"text": chunk_text})
 
     # Errors propagate to routes.py which wraps them as SSE error events
-    config = {"configurable": {"thread_id": f"chat-{rid}"}}
-    inputs = {
+    config: RunnableConfig = {"configurable": {"thread_id": f"chat-{rid}"}}
+    inputs: AgentState = {
         "messages": lc_messages,
         "system_prompt": system_prompt,
         "runtime_context": runtime_context,
@@ -540,14 +541,18 @@ async def run_agent_stream(
                     extra={"request_id": rid, "approved": approved},
                 )
                 async for ev in _consume(
-                    agent_graph.astream(Command(resume=approved), config=config, stream_mode="messages")
+                    agent_graph.astream(Command[bool](resume=approved), config=config, stream_mode="messages")
                 ):
                     yield ev
     finally:
         # 清理 checkpointer thread: MemorySaver 是内存存储, 不清理会随请求数增长
         # （HITL 挂起期间 generator 未结束, 不会走到这里——resume 完成或超时后才清理）
         try:
-            agent_graph.delete_thread(config["configurable"]["thread_id"])
+            from langgraph.checkpoint.base import BaseCheckpointSaver
+
+            checkpointer = agent_graph.checkpointer
+            if isinstance(checkpointer, BaseCheckpointSaver):
+                checkpointer.delete_thread(config["configurable"]["thread_id"])
         except Exception:
             pass
 

@@ -53,9 +53,8 @@ async def test_health_cache_expires_after_ttl(monkeypatch) -> None:
     monkeypatch.setattr(routes, "ping_llm", fake_ping)
     await routes._check_llm_available()
     # 把缓存时间戳拨回 TTL 之外
-    routes._llm_health_cache = (
-        routes._llm_health_cache[0] - routes._LLM_HEALTH_TTL_S - 1,
-        True,
-    )
+    cache = routes._llm_health_cache
+    assert cache is not None
+    routes._llm_health_cache = (cache[0] - routes._LLM_HEALTH_TTL_S - 1, True)
     await routes._check_llm_available()
     assert calls["n"] == 2

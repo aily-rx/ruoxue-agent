@@ -31,7 +31,8 @@ jobs:
         run: ruff check backend/
 
       - name: MyPy Type Check
-        run: mypy backend/ --ignore-missing-imports --explicit-package-bases
+        # --exclude: 本地 backend/venv 是运行时产物; CI 干净环境无此目录, 不影响
+        run: mypy backend/ --ignore-missing-imports --explicit-package-bases --exclude ".*venv.*"
 
       - name: Pytest
         run: python -m pytest backend/tests/ -v --asyncio-mode=auto

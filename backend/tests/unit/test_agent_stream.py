@@ -12,11 +12,17 @@ chroma_memory / _skill_loader 也替换为假实现, 保证测试不触碰真实
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 from backend.agent.agent_graph import run_agent_stream
 from backend.agent.emotional_agent import SSEEvent
 from langchain_core.messages import AIMessageChunk, ToolMessage
+
+
+def _d(ev: SSEEvent) -> dict:
+    """测试里事件 data 必为 dict（SSEEvent.data 类型是 dict | str）。"""
+    assert isinstance(ev.data, dict)
+    return ev.data
 
 
 class FakeGraph:
@@ -65,14 +71,14 @@ def _tool_message() -> ToolMessage:
     return ToolMessage(content="工具返回结果", tool_call_id="call_1")
 
 
-def _patch_deps(monkeypatch, items: list[object]) -> None:
+def _patch_deps(monkeypatch, items: Sequence[object]) -> None:
     """替换 agent_graph 模块的全局依赖为受控假实现。"""
-    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(items))
+    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(list(items)))
     monkeypatch.setattr("backend.agent.agent_graph.chroma_memory", FakeChromaMemory())
     monkeypatch.setattr("backend.agent.agent_graph._skill_loader", FakeSkillLoader())
 
 
-async def _collect(monkeypatch, items: list[object]) -> list[SSEEvent]:
+async def _collect(monkeypatch, items: Sequence[object]) -> list[SSEEvent]:
     _patch_deps(monkeypatch, items)
     events = [ev async for ev in run_agent_stream("测试输入", history=[])]
     return events
@@ -131,7 +137,7 @@ async def test_tool_phase_suppresses_internal_thinking(monkeypatch) -> None:
             _chunk("结果如下"),
         ],
     )
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert texts == ["查到了", "结果如下"]
     assert "我需要查一下资料" not in texts
     assert _event_names(events)[-1] == "done"
@@ -140,7 +146,7 @@ async def test_tool_phase_suppresses_internal_thinking(monkeypatch) -> None:
 async def test_tool_message_without_tool_calls_passes_through(monkeypatch) -> None:
     """非工具场景: 普通文本 chunk 不应被抑制。"""
     events = await _collect(monkeypatch, [_chunk("[EMOTION: neutral|0.3] 直接回答")])
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert texts == ["直接回答"]
 
 

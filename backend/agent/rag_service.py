@@ -160,6 +160,10 @@ def _tokenize(text: str) -> list[str]:
 
     Drops whitespace and pure-punctuation tokens (e.g. "+", "|", "->")
     that carry no retrieval signal.
+
+    注: 曾实验驼峰/下划线子词拆分（收尾① 分词粒度 miss 类）, 实测回退:
+    query 侧子词全库乱匹配、doc 侧子词改变语料平均长度扰动 BM25 长度
+    归一化, Recall@5 0.780→0.760。结论见 text/rag/rag-eval.md。
     """
     tokens: list[str] = []
     for tok in jieba.lcut(text.lower()):

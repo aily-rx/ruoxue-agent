@@ -38,6 +38,7 @@ warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = true
+exclude = ["backend/venv/", "venv/"]  # 本地 venv 是运行时产物, 不参与类型检查（CI 干净环境无此目录）
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

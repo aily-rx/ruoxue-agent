@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 import numpy as np
 import pytest
@@ -25,6 +25,7 @@ from backend.tests.unit.test_agent_stream import (
     FakeChromaMemory,
     FakeSkillLoader,
     _chunk,
+    _d,
     _tool_message,
 )
 from langchain_core.messages import AIMessageChunk
@@ -45,8 +46,8 @@ class FakeGraph:
             yield item
 
 
-def _patch_stream(monkeypatch, items: list[object]) -> None:
-    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(items))
+def _patch_stream(monkeypatch, items: Sequence[object]) -> None:
+    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(list(items)))
     monkeypatch.setattr("backend.agent.agent_graph.chroma_memory", FakeChromaMemory())
     monkeypatch.setattr("backend.agent.agent_graph._skill_loader", FakeSkillLoader())
 
@@ -59,10 +60,10 @@ def _clean_reply_cache():
     _reply_cache.clear()
 
 
-async def _collect(monkeypatch, text: str, items: list[object], use_cache: bool = False) -> list:
+async def _collect(monkeypatch, text: str, items: Sequence[object], use_cache: bool = False) -> list:
     _patch_stream(monkeypatch, items)
     events = [ev async for ev in run_agent_stream(text, history=[], request_id="req-cache", use_cache=use_cache)]
-    return [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    return [_d(ev).get("text", "") for ev in events if ev.event == "token"]
 
 
 # --- LLM 单例 ---

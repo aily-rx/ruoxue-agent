@@ -11,18 +11,25 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 import pytest
 from backend.agent.agent_graph import (
     MAX_TOOL_ROUNDS,
+    AgentState,
     _ainvoke_with_retry,
     agent_node,
     run_agent_stream,
     should_continue,
 )
 from backend.agent.emotional_agent import SSEEvent
-from backend.tests.unit.test_agent_stream import FakeChromaMemory, FakeSkillLoader, _chunk, _tool_message
+from backend.tests.unit.test_agent_stream import (
+    FakeChromaMemory,
+    FakeSkillLoader,
+    _chunk,
+    _d,
+    _tool_message,
+)
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
@@ -69,8 +76,8 @@ class FakeGraph:
             yield item
 
 
-def _patch_stream(monkeypatch, items: list[object]) -> None:
-    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(items))
+def _patch_stream(monkeypatch, items: Sequence[object]) -> None:
+    monkeypatch.setattr("backend.agent.agent_graph.agent_graph", FakeGraph(list(items)))
     monkeypatch.setattr("backend.agent.agent_graph.chroma_memory", FakeChromaMemory())
     monkeypatch.setattr("backend.agent.agent_graph._skill_loader", FakeSkillLoader())
 
@@ -79,32 +86,54 @@ def _patch_stream(monkeypatch, items: list[object]) -> None:
 
 
 def test_should_continue_stops_when_over_round_limit() -> None:
-    state = {
+    state: AgentState = {
         "messages": [
             AIMessage(content="x", tool_calls=[{"name": "search_web", "args": {}, "id": "1", "type": "tool_call"}])
         ],
+        "system_prompt": "",
+        "runtime_context": "",
+        "memory_context": "",
+        "skill_context": "",
         "tool_rounds": MAX_TOOL_ROUNDS + 1,
     }
     assert should_continue(state) == END
 
 
 def test_should_continue_routes_to_tools_within_limit() -> None:
-    state = {
+    state: AgentState = {
         "messages": [
             AIMessage(content="x", tool_calls=[{"name": "search_web", "args": {}, "id": "1", "type": "tool_call"}])
         ],
+        "system_prompt": "",
+        "runtime_context": "",
+        "memory_context": "",
+        "skill_context": "",
         "tool_rounds": 3,
     }
     assert should_continue(state) == "tools"
 
 
 def test_should_continue_ends_without_tool_calls() -> None:
-    state = {"messages": [AIMessage(content="普通回复")], "tool_rounds": 0}
+    state: AgentState = {
+        "messages": [AIMessage(content="普通回复")],
+        "system_prompt": "",
+        "runtime_context": "",
+        "memory_context": "",
+        "skill_context": "",
+        "tool_rounds": 0,
+    }
     assert should_continue(state) == END
 
 
 def test_should_continue_ends_when_over_limit_even_without_tools() -> None:
-    state = {"messages": [AIMessage(content="回复")], "tool_rounds": MAX_TOOL_ROUNDS + 1}
+    state: AgentState = {
+        "messages": [AIMessage(content="回复")],
+        "system_prompt": "",
+        "runtime_context": "",
+        "memory_context": "",
+        "skill_context": "",
+        "tool_rounds": MAX_TOOL_ROUNDS + 1,
+    }
     assert should_continue(state) == END
 
 
@@ -123,7 +152,7 @@ async def test_agent_node_increments_tool_rounds(monkeypatch) -> None:
 
     monkeypatch.setattr("backend.agent.agent_graph._ainvoke_with_retry", fake_retry)
 
-    state = {
+    state: AgentState = {
         "messages": [],
         "system_prompt": "persona",
         "runtime_context": "",
@@ -166,7 +195,7 @@ async def test_tool_limit_reached_yields_hint(monkeypatch) -> None:
     _patch_stream(monkeypatch, items)
 
     events = [ev async for ev in run_agent_stream("任务", history=[])]
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert texts and "拆小一点" in texts[0]
     assert _event_names(events)[-1] == "done"
 
@@ -177,7 +206,7 @@ async def test_normal_reply_within_limit_no_hint(monkeypatch) -> None:
     _patch_stream(monkeypatch, items)
 
     events = [ev async for ev in run_agent_stream("任务", history=[])]
-    texts = [ev.data.get("text", "") for ev in events if ev.event == "token"]
+    texts = [_d(ev).get("text", "") for ev in events if ev.event == "token"]
     assert texts == ["查到了"]
 
 
