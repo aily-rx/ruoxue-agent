@@ -24,8 +24,6 @@
 
 | 文档 | 分类 | 说明 | 更新日期 |
 |---|---|---|---|
-| `interview/面试准备与项目补全指南.md` | interview | AI 应用工程师求职准备：知识点图谱 + 7 大短板补全方案 + 进度核对 | 2026-08-14 |
-| `interview/面试冲刺学习计划.md` | interview | 面试前一周冲刺：7 天时间分配 + 22 个知识点详解（P0/P1/P2 分级）+ 我的意见 | 2026-08-14 |
 | `rag/rag-eval.md` | rag | RAG 检索质量评估基线（Recall@k / MRR），三配置对比 0.15→0.95 | 2026-08-13 |
 | `rag/rag-generation-eval.md` | rag | RAG 生成质量评估基线（RAGAS 三指标：faithfulness 0.905 / relevancy 0.595 / precision 0.781） | 2026-08-14 |
 | `retrospective/短板1-评估体系补全过程复盘.md` | retrospective | 建立 RAG 评估体系的完整过程复盘（含排查思维链） | 2026-08-13 |
