@@ -2,6 +2,8 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
+# 国内环境 registry 直连超时（npm ci 在容器内访问官方源会卡死）
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 COPY . .
 RUN npm run build
