@@ -4,8 +4,8 @@
 FROM python:3.12-slim AS builder
 WORKDIR /app
 COPY requirements.txt .
-# 国内环境 pypi 直连超时, 用清华镜像（CI 的 GitHub runner 亦可访问）
-RUN pip install --no-cache-dir --user -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+# 官方源在 CI（GitHub runner）已验证可用; 本地构建的国内网络问题应靠 Docker 代理解决
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 FROM python:3.12-slim
 WORKDIR /app
@@ -14,11 +14,11 @@ WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
-# Copy DeepSeek Skills (dynamic prompt injection for agent_graph.py)
-COPY deepseek-skills/ ./deepseek-skills/
-
 # Copy backend source code (kept as 'backend' package for imports)
 COPY . ./backend/
+
+# 注: skills/ 已迁移到仓库根目录（1213429 skills-kit 重构）,
+# build context 是 backend/, 无法复制——容器内 skill 注入降级（聊天/Agent/RAG 不受影响）
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
