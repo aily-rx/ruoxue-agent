@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 ## 硬约束（始终生效，不需要关键词触发）
 
 以下规则来自 `skills/CORE_RULES.md`，**每次对话自动执行，不可跳过**。
@@ -23,10 +27,6 @@
 ---
 
 ## 项目信息
-
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
 
@@ -59,6 +59,7 @@ pip install -r requirements.txt   # 安装 Python 依赖
 cp .env.example .env
 
 # 必须从项目根目录启动（import 使用 backend.xxx 绝对路径）
+# 本地依赖已装在 backend/venv（Windows: backend/venv/Scripts/python.exe）
 cd ..
 python -m backend.main            # 启动 FastAPI 服务 → http://localhost:8000
 ```
@@ -79,6 +80,42 @@ curl http://localhost:8000/api/health
 # Swagger 文档
 open http://localhost:8000/docs
 ```
+
+## Docker 部署（2026-08-18 配置）
+
+`docker-compose.yml` 一键起全栈：**backend（8000）+ frontend（80）** 两个独立容器。frontend 是 nginx 静态托管 + 反向代理，`location /api` → `http://backend:8000`（**用 compose 服务名跨容器通信，禁止写 localhost/127.0.0.1**——容器内 localhost 是自己）。前端生产代码用相对路径 `/api`，`vite.config.ts` 里的 `localhost:8000` 仅本地 dev proxy。
+
+```bash
+docker compose up -d --build   # 构建 + 启动（日常改代码就这一条，增量重建秒级）
+docker compose logs -f backend # 跟踪日志
+docker compose down            # 停止（--volumes 才删数据，bind mount 目录始终保留）
+docker compose config          # 校验配置（含 .env 插值结果）
+```
+
+### 镜像源与代理（本地构建无需任何代理）
+
+- **backend Dockerfile**：pip 用清华源（`-i https://pypi.tuna.tsinghua.edu.cn/simple`）；**frontend Dockerfile**：npm 用 npmmirror（`--registry=https://registry.npmmirror.com`）。实测国内直连 1-2s vs 官方源 15s+ 超时。
+- 本机 `~/.docker/config.json` 的 `proxies` **已移除**（备份：`config.json.bak-proxy`、`config.json.bak`）。若需恢复，**必须用 `http://host.docker.internal:7890`，不能用 `127.0.0.1:7890`**——后者在构建容器内是容器自己，pip/npm 会 `ProxyError: Connection refused` 直接失败。
+- **运行期不需要代理**：DeepSeek / Tavily 直连（国内可直连），ASR/TTS 纯本地离线。
+
+### 镜像固化 vs 卷挂载（代码死、数据活）
+
+| 文件 | 方式 | 改后生效方式 |
+|---|---|---|
+| backend/frontend 代码 | 拷入镜像（COPY） | `docker compose up -d --build` 增量重建（秒级） |
+| `requirements.txt` / `package*.json` | pip/npm 层 | 重下依赖（分钟级，需网络） |
+| `model_assets/`（ASR 模型） | `:ro` 挂载 `/app/model_assets` | 直接替换宿主机文件，零操作 |
+| `chroma_data/`、`faiss_data/` | 挂载 | 直接写，零操作 |
+| `skills/` | `:ro` 挂载 `/app/skills` | 直接写，零操作 |
+
+> 容器内 skills 路径是 `/app/skills`（`agent_graph.py` 从 `__file__` 三级 `parent` 计算：`/app/backend/agent/agent_graph.py → /app/skills`）。**build context 是 `backend/`，根目录的 `skills/` 拷不进镜像**，只能靠 compose 挂载——移除挂载后 skill 注入静默降级（不报错，skill 匹配直接返回 None）。
+
+### 环境变量与健康检查
+
+- `.env` 必须放**项目根目录**：`docker compose` 的 `${VAR:-}` 插值只读根目录 `.env`，backend 容器内 `config.py` 也找 `/app/.env`。根目录 `.env` 已被 `.gitignore` 忽略。
+- `backend/.env` 仅本地运行用（config.py 二次加载 override），**含 `HTTP_PROXY=127.0.0.1:7890` 本地代理——不要把它带进 compose/容器**（容器内该地址不可达，会让 httpx 全部请求失败）。
+- 验证：`curl http://localhost:8000/api/health` → `{"status":"ok","llm_available":true,"asr_available":true}`（llm_available 依赖根目录 .env 的 key）；`curl -o /dev/null -w "%{http_code}" http://localhost/` 应为 200。
+- CI（`.github/workflows/ci-cd.yml`）lint+test 通过后推镜像到 **GHCR**（`ghcr.io/<repo>/ruoxue-backend|frontend`），与本地 compose 构建互不影响。
 
 ## 协作规范
 
@@ -354,7 +391,7 @@ while (true) {
 | Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
 | Phase 4 | ✅ 完成 | Agent 智能体：LangGraph + 5 工具 + Chroma 记忆 + FAISS RAG |
 
-> **测试与质量现状（2026-08-14 更新）**：后端 116 个测试全绿（unit + integration + eval），行覆盖率 **82%**；
+> **测试与质量现状（2026-08-18 更新）**：后端 143 个测试（unit + integration + eval，2026-08-18 收集），行覆盖率 **82%**；
 > 前端 vitest + ESLint 已配置；ruff + mypy + pre-commit/pre-push hooks 全量生效。
 > 测试命令：`python -m pytest backend/tests/ -q --asyncio-mode=auto`（后端，项目根目录执行）、
 > `cd frontend && npm run test`（前端）、`cd backend && ruff check .`（lint）。
@@ -402,6 +439,7 @@ Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/
 | `text/README.md` | **过程性文档索引**（面试准备/评估数据/短板复盘——一律归 `text/` 分类，不进 `docs/`） |
 | `text/rag/rag-eval.md` | RAG 检索评估基线（Recall@5 0.95 / MRR 0.749） |
 | `text/rag/rag-generation-eval.md` | RAG 生成评估基线（RAGAS：faithfulness 0.905 / relevancy 0.595 / precision 0.781） |
+| `text/rag/rag-real-chain-claim-audit.md` | 真实链路 claim 级抽检（faithfulness 0.176 低分构成拆解、三类归因） |
 <!-- SKILLS:START -->
 
 | Skill | 触发关键词 | 位置 |
