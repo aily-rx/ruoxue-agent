@@ -14,6 +14,7 @@ env/
 *.log
 
 # Environment & Config (keep .example files)
+.env
 backend/.env
 .env.local
 .env.*.local

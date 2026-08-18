@@ -2,8 +2,8 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-# 官方源在 CI（GitHub runner）已验证可用; 本地构建的国内网络问题应靠 Docker 代理解决
-RUN npm ci
+# 本地构建用 npmmirror 源（实测 ~2s vs 官方源 15s+）; CI 可通过 npm_config_registry 覆盖
+RUN npm ci --registry=https://registry.npmmirror.com
 COPY . .
 RUN npm run build
 
