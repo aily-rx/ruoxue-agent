@@ -49,6 +49,10 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))  # 最终返回给 LLM 的片段数
 RAG_VECTOR_K = int(os.getenv("RAG_VECTOR_K", "20"))  # 向量路候选数
 RAG_BM25_K = int(os.getenv("RAG_BM25_K", "20"))  # BM25 路候选数
+# --- RAG rerank（cross-encoder 重排, 2026-08-18 引入）---
+RAG_RERANK_ENABLED = os.getenv("RAG_RERANK_ENABLED", "1").lower() in ("1", "true", "yes")
+RAG_RERANK_CANDIDATES = int(os.getenv("RAG_RERANK_CANDIDATES", "20"))  # RRF 融合后送入 rerank 的候选数
+RAG_RERANK_TOP_PASS = int(os.getenv("RAG_RERANK_TOP_PASS", "3"))  # 保底: 任一路 rank≤N 的 chunk 强制入候选池
 
 # --- Human-in-the-loop（工具调用前人工确认）---
 # 开启后 Agent 调用工具前会先经 SSE 发 tool_request 事件, 由用户确认后才执行

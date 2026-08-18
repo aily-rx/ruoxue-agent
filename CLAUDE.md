@@ -322,6 +322,11 @@ neutral 切换为单阶段直接 lerp。
 | `TTS_VOICE` | `zh-CN-XiaoxiaoNeural` | Edge TTS 语音 |
 | `TTS_PROXY` | 空 | HTTP 代理（用于 Edge TTS） |
 | `ASR_MODEL_DIR` | `model_assets/asr/sensevoice-small-int8` | SenseVoice 模型路径 |
+| `RAG_TOP_K` | `4` | 最终返回给 LLM 的片段数 |
+| `RAG_VECTOR_K` / `RAG_BM25_K` | `20` / `20` | 混合检索两路候选数 |
+| `RAG_RERANK_ENABLED` | `1` | cross-encoder rerank 开关（bge-reranker-base，模型缺失自动降级 RRF） |
+| `RAG_RERANK_CANDIDATES` | `20` | RRF 融合后送入 rerank 的候选数 |
+| `RAG_RERANK_TOP_PASS` | `3` | 保底规则：任一路 rank≤N 强制入候选池（修复 RRF 单路强信号被稀释） |
 
 ### ASR 服务
 
@@ -391,7 +396,7 @@ while (true) {
 | Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
 | Phase 4 | ✅ 完成 | Agent 智能体：LangGraph + 5 工具 + Chroma 记忆 + FAISS RAG |
 
-> **测试与质量现状（2026-08-18 更新）**：后端 143 个测试（unit + integration + eval，2026-08-18 收集），行覆盖率 **82%**；
+> **测试与质量现状（2026-08-18 更新）**：后端 141 个测试（unit + integration，2026-08-18 实测）+ RAG 检索评估 3 个（本地手动），行覆盖率 **82%**；
 > 前端 vitest + ESLint 已配置；ruff + mypy + pre-commit/pre-push hooks 全量生效。
 > 测试命令：`python -m pytest backend/tests/ -q --asyncio-mode=auto`（后端，项目根目录执行）、
 > `cd frontend && npm run test`（前端）、`cd backend && ruff check .`（lint）。
@@ -437,7 +442,7 @@ Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/
 | `docs/phase1-summary.md` | Phase 1 完成总结（SSE 流式、情绪标签、会话记忆、聊天 UI） |
 | `Agent.md` | 共享知识库索引（经验文档触发机制、命名规范、架构规则） |
 | `text/README.md` | **过程性文档索引**（面试准备/评估数据/短板复盘——一律归 `text/` 分类，不进 `docs/`） |
-| `text/rag/rag-eval.md` | RAG 检索评估基线（Recall@5 0.95 / MRR 0.749） |
+| `text/rag/rag-eval.md` | RAG 检索评估基线（50 题：Recall@5 0.78 / MRR@5 0.662；含 2026-08-18 分块死循环修复与重建记录） |
 | `text/rag/rag-generation-eval.md` | RAG 生成评估基线（RAGAS：faithfulness 0.905 / relevancy 0.595 / precision 0.781） |
 | `text/rag/rag-real-chain-claim-audit.md` | 真实链路 claim 级抽检（faithfulness 0.176 低分构成拆解、三类归因） |
 <!-- SKILLS:START -->

@@ -14,6 +14,12 @@
 - 2026-08-14（混合检索, 13501 chunks, n=50 评估集扩充后）:
     recall@1=0.500  recall@3=0.640  recall@5=0.780  mrr@5=0.588
     → 20 题样本小（0.95 高估），50 题是更真实的水平估计；miss 分类见 rag-eval.md
+- 2026-08-18（死循环修复重建索引, 330 chunks）:
+    hybrid  recall@1=0.580  recall@3=0.780  recall@5=0.780  mrr@5=0.673
+    → 修复前索引 97% 重复，旧基线系统性低估，见 rag-eval.md §五
+- 2026-08-18（+ bge-reranker-base 重排, 20 候选）:
+    hybrid  recall@1=0.620  recall@3=0.800  recall@5=0.860  mrr@5=0.710
+    → rerank 配置权衡（候选数/延迟）见 rag-eval.md §六
 
 基线用途：后续所有检索优化（rerank、chunk 策略调整、换 embedding）都以本文件
 输出的指标为基准做对比，保证改动可量化、可回归。

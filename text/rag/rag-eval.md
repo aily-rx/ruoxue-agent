@@ -114,3 +114,83 @@ rerank 只能重排候选池，救不了池外题目。11 个 miss 的 gold 是�
 
 **结论：方案 B 的预期上限是把 11 miss 收到 4（保守估计 3-5 题），
 完整解决需要 B（rerank）+ C（查询改写）组合 + 元文档污染治理。**
+
+## 五、P0 修复：分块死循环 + 索引重建（2026-08-18）
+
+### 发现：旧索引 97% 内容重复
+
+检查 `faiss_data/knowledge_meta.json` 发现 `_chunk_text` 死循环 bug：
+
+- **根因**：`start = end - overlap` 不保证前进——短行文档（markdown 表格/列表）
+  的 chunk 实际长度 < overlap(80) 时，`end - 80 <= start`，同一片段被反复切出，
+  直到 `max_chunks=500` 强制终止。
+- **证据**：13501 条索引仅 **346 唯一（2.6%）**；27/28 文件全部恰好 500 条；
+  `frontend/dependencies.md`（1200 字符）500 条中 497 条完全相同。
+- **影响**：重复向量淹没 FAISS 索引、BM25 IDF 失真、排序质量被重复 chunk 干扰
+  （Recall@1 / MRR 被系统性低估）。
+
+### 修复（`rag_service.py` `_chunk_text`）
+
+```python
+next_start = end - overlap
+start = next_start if next_start > start else end   # 死循环防护
+```
+
+overlap 只在 chunk 确实够长时生效，否则无重叠直接前进；`max_chunks` 500→10000。
+修复后单测：表格 1506 字符→5 chunks（全唯一）、真实大文档 17255 字符→46 chunks（全唯一）。
+
+### 重建后新基线（330 chunks，2026-08-18）
+
+重建命令：`python -c "from backend.agent.rag_service import KnowledgeBase; KnowledgeBase().index_directory('docs')"`
+（只索引 `docs/`，**顺带清除了 rag-eval.md / 短板复盘等元文档污染**）
+
+| 配置 | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+|------|:---:|:---:|:---:|:---:|
+| 旧索引（13501 重复膨胀） | 0.500 | 0.640 | 0.780 | 0.588 |
+| 纯向量（新索引） | 0.420 | 0.520 | 0.620 | 0.485 |
+| 混合（新索引） | **0.600** | **0.740** | **0.780** | **0.662** |
+
+**结论：Recall@1 +0.10、Recall@3 +0.10、MRR@5 +0.074（+12.6%），Recall@5 持平。
+修复前评估集在重复膨胀语料上测量——top-1 精度和排序质量被重复 chunk 系统性低估，
+真实检索能力比旧基线显示的更强。11 个 miss 中多题已因去重自动命中（rank 0→1）。**
+
+## 六、Cross-encoder rerank 集成（2026-08-18）
+
+### 背景：11 个 miss 的修复路径
+
+§四 D 分析过：11 个 miss 中 7 个的 gold 在 top-20 候选池内（rerank 可救），
+4 个在池外（rerank 救不了，需查询改写/跨语言索引——方案 C，本期未做）。
+
+### 实现（方案 B：直接引入 rerank）
+
+1. **bge-reranker-base**（本地 CPU，ModelScope 下载到
+   `model_assets/rerankers/`，gitignore）——懒加载 + LRU 缓存（同 query 命中 2ms）；
+   模型缺失/推理异常时**静默降级为 RRF 顺序**（`available()` 首次探测后只警告一次）。
+2. **单路强信号保底 boost**（`RAG_RERANK_TOP_PASS=3`）：任一路 rank≤3 的 chunk
+   fusion 时 +10.0——修复 RRF 固有缺陷"双路平庸 > 单路极强"
+   （单路 rank=1 得 1/61=0.0164，会被 v=2/b=3 的 1/62+1/63=0.0317 挤掉）。
+   若不保底，候选池会被双路平庸 chunk 占满，强信号 chunk 进不了 rerank 候选池。
+3. 配置化（`backend/config.py`）：`RAG_RERANK_ENABLED` / `RAG_RERANK_CANDIDATES`
+   （默认 20）/ `RAG_RERANK_TOP_PASS`（默认 3），改 .env 即可调参。
+
+### 评估结果（330 chunks 新索引，n=50）
+
+| 配置 | Recall@1 | Recall@3 | Recall@5 | MRR@5 | 延迟(新 query) |
+|------|:---:|:---:|:---:|:---:|:---:|
+| 纯 RRF+boost（无 rerank） | 0.580 | 0.780 | 0.780 | 0.673 | ~80ms |
+| + rerank 10 候选 | 0.580 | 0.800 | 0.820 | 0.687 | ~1.4-1.7s |
+| **+ rerank 20 候选（默认）** | **0.620** | **0.800** | **0.860** | **0.710** | ~3.2s |
+| + rerank 20 候选, max_len=256 | 0.600 | 0.780 | 0.860 | 0.699 | ~2.8s |
+
+**决策记录**：
+- 默认 **20 候选 + max_length=512**（指标最优；CPU 推理确定性，256 vs 512 的
+  0.02 差距经对照实验确认为真实截断损失，非噪声——长 chunk 超 256 token 被截断）。
+- 延迟敏感场景可调 `RAG_RERANK_CANDIDATES=10`（R@5 0.82, ~1.7s）或
+  `RAG_RERANK_ENABLED=0` 一键回到纯 RRF（0.78, ~80ms）；同 query 命中缓存仅 2ms。
+- 成本核算：模型 1.1GB 磁盘 + 每 query ~3s CPU 推理（对比原 80ms）——纯本地推理
+  无 API 费用；这是"延迟换 4 个点 Recall@5"的权衡，知识库问答场景可接受。
+
+### 剩余短板（方案 C 未做，留档）
+
+4 个池外 miss（Phase 1 流式/会话记忆隔离/待机动画/ASR 完整名称）需要
+**查询改写**（query 扩写/中英翻译）或跨语言索引才能解决——本期未实现，见 §四 B 结论。

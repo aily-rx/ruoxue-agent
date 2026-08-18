@@ -44,9 +44,23 @@ def test_chunk_text_long_splits_with_overlap() -> None:
 
 
 def test_chunk_text_respects_max_chunks() -> None:
-    text = _DOC * 5000
+    text = _DOC * 50000
     chunks = _chunk_text(text)
-    assert len(chunks) <= 500  # max_chunks 上限
+    assert len(chunks) <= 10000  # max_chunks 极端保护上限
+
+
+def test_chunk_text_no_duplicate_short_line_docs() -> None:
+    """回归(2026-08-18 P0): 短行文档(表格/列表)曾触发死循环.
+
+    旧逻辑 start = end - overlap 不保证前进, chunk 实际长度 < overlap(80) 时
+    同一片段被反复切出直到 max_chunks 强制终止 —— 线上索引 13501 条仅 346 唯一.
+    """
+    table = "| 列1 | 列2 |\n" + "".join(f"| 值{i} | 数据{i} |\n" for i in range(100))
+    lst = "## 列表\n" + "".join(f"- 项目{i}: 描述内容{i}\n" for i in range(200))
+    for text in (table, lst):
+        chunks = _chunk_text(text)
+        assert len(chunks) == len(set(chunks)), "同一文本片段被重复切出（死循环）"
+        assert len(chunks) < 50, f"短文档不应产生海量 chunk: {len(chunks)}"
 
 
 def test_chunk_text_prefers_sentence_boundary() -> None:
@@ -107,7 +121,7 @@ def test_search_formats_result_with_source(tmp_path: Path) -> None:
 
     result = kb.search("SSE 流式回复")
     assert "intro.md" in result  # 结果带来源标注
-    assert "rrf=" in result
+    assert "score=" in result  # RRF 融合后/rerank 后统一展示融合分数
 
 
 def test_search_on_empty_kb(tmp_path: Path) -> None:

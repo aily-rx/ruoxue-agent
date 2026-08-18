@@ -105,7 +105,7 @@ class ASRService:
                 model_file = onnx_files[0]
 
         if model_file is None:
-            raise FileNotFoundError(f"No ONNX model found in {model_dir}. " f"Expected model.int8.onnx or model.onnx")
+            raise FileNotFoundError(f"No ONNX model found in {model_dir}. Expected model.int8.onnx or model.onnx")
 
         tokens_file = model_dir / "tokens.txt"
         if not tokens_file.exists():

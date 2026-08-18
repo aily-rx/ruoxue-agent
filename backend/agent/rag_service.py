@@ -20,7 +20,14 @@ from pathlib import Path
 import faiss
 import jieba
 import numpy as np
-from backend.config import RAG_BM25_K, RAG_TOP_K, RAG_VECTOR_K
+from backend.config import (
+    RAG_BM25_K,
+    RAG_RERANK_CANDIDATES,
+    RAG_RERANK_ENABLED,
+    RAG_RERANK_TOP_PASS,
+    RAG_TOP_K,
+    RAG_VECTOR_K,
+)
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from rank_bm25 import BM25Okapi
 
@@ -131,7 +138,7 @@ def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str
 
     chunks: list[str] = []
     start = 0
-    max_chunks = 500
+    max_chunks = 10000
 
     while start < text_len and len(chunks) < max_chunks:
         end = min(start + chunk_size, text_len)
@@ -146,7 +153,13 @@ def _chunk_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        start = end - overlap
+        # 死循环防护（2026-08-18 修复）:
+        # 短行文档（markdown 表格/列表）里 chunk 实际长度 < overlap 时,
+        # 旧逻辑 start = end - overlap 会回退到原地, 同一片段被反复切出,
+        # 直到 max_chunks 强制终止 → 索引 97% 内容重复（13501 条仅 346 唯一）。
+        # 修复: overlap 只在 chunk 确实够长时生效, 否则无重叠直接前进。
+        next_start = end - overlap
+        start = next_start if next_start > start else end
     return chunks
 
 
@@ -306,7 +319,7 @@ class KnowledgeBase:
             doc = self._docs[idx] if idx < len(self._docs) else "(missing)"
             meta = self._metas[idx] if idx < len(self._metas) else {}
             src = meta.get("source", "unknown")
-            lines.append(f"--- [{src}] (rrf={score:.3f}) ---\n{doc}")
+            lines.append(f"--- [{src}] (score={score:.3f}) ---\n{doc}")
 
         return "\n\n".join(lines)
 
@@ -324,10 +337,17 @@ class KnowledgeBase:
         merge is robust to the two retrievers having incompatible score scales
         (cosine similarity vs BM25 term-frequency scores).
 
+        保底规则（2026-08-18）: 任一路 rank ≤ RAG_RERANK_TOP_PASS 的 chunk
+        获得大额 boost —— 修复 RRF 固有缺陷"双路平庸 > 单路极强"
+        （单路 rank=1 的 chunk 得 1/61=0.0164, 会被 v=2/b=3 的 0.0317 挤掉）。
+
+        候选池随后经 cross-encoder rerank（bge-reranker-base, CPU）重排,
+        模型缺失/失败时自动保持 RRF 顺序（降级为纯 RRF 行为）。
+
         Falls back to pure vector search when the BM25 index is unavailable.
 
-        参数默认值来自 backend.config（RAG_TOP_K / RAG_VECTOR_K / RAG_BM25_K），
-        调参实验只需改环境变量或 .env，不用改代码。
+        参数默认值来自 backend.config（RAG_TOP_K / RAG_VECTOR_K / RAG_BM25_K /
+        RAG_RERANK_*），调参实验只需改环境变量或 .env，不用改代码。
         """
         if k is None:
             k = RAG_TOP_K
@@ -351,12 +371,24 @@ class KnowledgeBase:
         order = np.argsort(bm25_scores)[::-1][:bm25_k]
         bm25_hits = [(int(idx), rank) for rank, idx in enumerate(order, start=1) if bm25_scores[idx] > 0]
 
-        # 3. RRF fusion
+        # 3. RRF fusion + 单路强信号保底 boost
+        top_pass = RAG_RERANK_TOP_PASS
         fused: dict[int, float] = {}
         for idx, rank in [*vector_hits, *bm25_hits]:
-            fused[idx] = fused.get(idx, 0.0) + 1.0 / (60.0 + rank)
+            boost = 10.0 if rank <= top_pass else 0.0  # 远大于任何 RRF 差值
+            fused[idx] = fused.get(idx, 0.0) + 1.0 / (60.0 + rank) + boost
+        ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
 
-        return sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        # 4. Cross-encoder rerank（候选池重排; 失败自动保持 RRF 顺序）
+        if RAG_RERANK_ENABLED:
+            from backend.agent.reranker import rerank
+
+            candidates = ranked[:RAG_RERANK_CANDIDATES]
+            pairs = [(idx, self._docs[idx]) for idx, _ in candidates if idx < len(self._docs)]
+            reranked = rerank(query, pairs)
+            if reranked:
+                return reranked[:k]
+        return ranked[:k]
 
     def search_indices(self, query: str, k: int | None = None) -> list[tuple[int, float]]:
         """Return raw (chunk_index, similarity) pairs for eval / hybrid retrieval.
