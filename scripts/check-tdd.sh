@@ -17,9 +17,11 @@ for src in $SRC_FILES; do
     src_name=$(basename "$src" .py)
     src_dir=$(dirname "$src")
     test_file="${src_dir}/tests/test_${src_name}.py"
-    test_file2="${src_dir}/../../tests/unit/${src_dir##*/}/test_${src_name}.py"
+    # 项目实际测试根在 backend/tests/unit/（2026-08-18 修正, reranker.py 暴露）
+    test_file2="${src_dir}/../tests/unit/${src_dir##*/}/test_${src_name}.py"  # 子目录布局
+    test_file3="${src_dir}/../tests/unit/test_${src_name}.py"                 # 扁平布局（当前项目）
 
-    if [ ! -f "$test_file" ] && [ ! -f "$test_file2" ]; then
+    if [ ! -f "$test_file" ] && [ ! -f "$test_file2" ] && [ ! -f "$test_file3" ]; then
         echo "  ${src} -> 缺少测试文件"
         MISSING=true
     fi
