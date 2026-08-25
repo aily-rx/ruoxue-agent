@@ -81,6 +81,14 @@ curl http://localhost:8000/api/health
 open http://localhost:8000/docs
 ```
 
+### 全量 CI 验证（硬约束第 1 条的落地脚本）
+
+`scripts/verify.sh` 与 `.github/workflows/ci-cd.yml` 逐条对齐（ruff → mypy → pytest → eslint → vitest → Docker 构建 → 技能硬约束检查）。**声称"没问题了/ALL PASSED"之前必须先跑它并看到全部 PASS**：
+
+```bash
+bash scripts/verify.sh   # Windows 用 Git Bash；需 Docker 可用（有 docker-backend/frontend 两步）
+```
+
 ## Docker 部署（2026-08-18 配置）
 
 `docker-compose.yml` 一键起全栈：**backend（8000）+ frontend（80）** 两个独立容器。frontend 是 nginx 静态托管 + 反向代理，`location /api` → `http://backend:8000`（**用 compose 服务名跨容器通信，禁止写 localhost/127.0.0.1**——容器内 localhost 是自己）。前端生产代码用相对路径 `/api`，`vite.config.ts` 里的 `localhost:8000` 仅本地 dev proxy。
@@ -138,7 +146,8 @@ Service          FastAPI routes (/api/chat, /api/asr, /api/health)
     ↑
 Agent            emotional_agent (LangChain + DeepSeek), memory, graph, tools
     ↑
-Provider         DeepSeek API, Edge TTS, SenseVoice ASR, pypinyin G2P
+Provider         DeepSeek API, Edge TTS, SenseVoice ASR, pypinyin G2P,
+                 bge 本地模型 (embedding/rerank), FAISS/Chroma, Tavily
 ```
 
 ### 后端模块结构
@@ -151,11 +160,13 @@ backend/
 ├── config.py            环境变量配置（LLM、会话、TTS、ASR 参数）
 ├── agent/
 │   ├── emotional_agent.py   [Legacy] 提供 EMOTION_SYSTEM_PROMPT 常量
-│   ├── agent_graph.py       Phase 4: LangGraph StateGraph + 三层 prompt
+│   ├── agent_graph.py       Phase 4: LangGraph StateGraph + 三层 prompt + skill 注入
+│   ├── skill_loader.py      关键词匹配 → 动态加载 skills/ 下的 skill（front matter name+trigger_keywords）
 │   ├── tools.py             Phase 4: 5 个工具 (search/read/weather/list/knowledge)
 │   ├── memory.py            短期记忆（dict 滑动窗口）
 │   ├── chroma_memory.py     Phase 4: Chroma 长期记忆（语义检索）
-│   └── rag_service.py       Phase 4: FAISS 知识库（文档索引 + 语义搜索）
+│   ├── rag_service.py       FAISS 知识库：bge-small-zh-v1.5 embedding + jieba BM25 + RRF 融合
+│   └── reranker.py          cross-encoder 重排（bge-reranker-base，CPU 懒加载，缺失自动降级 RRF 顺序）
 ├── tts/
 │   ├── tts_service.py       Edge TTS 合成（基础 + WordBoundary 模式）
 │   ├── g2p_service.py       中文 G2P（pypinyin：汉字→声母/韵母）
@@ -328,6 +339,19 @@ neutral 切换为单阶段直接 lerp。
 | `RAG_RERANK_CANDIDATES` | `20` | RRF 融合后送入 rerank 的候选数 |
 | `RAG_RERANK_TOP_PASS` | `3` | 保底规则：任一路 rank≤N 强制入候选池（修复 RRF 单路强信号被稀释） |
 
+### RAG 检索链路（2026-08-18 增强后）
+
+```
+查询 → bge-small-zh-v1.5 向量 top-N + jieba BM25 top-N
+     → RRF 融合（K=60，rank≤TOP_PASS 加 boost=10 保底）
+     → bge-reranker-base cross-encoder 重排（前 CANDIDATES 个候选）
+     → RAG_TOP_K 片段注入 LLM
+```
+
+- **模型路径**：embedding 在 `model_assets/embeddings/bge-small-zh-v1.5/`，reranker 在 `model_assets/rerankers/bge-reranker-base/`（均 gitignored、CPU 懒加载）。
+- **优雅降级**：embedding 缺失 → 自动回退 Chroma 内置 ONNX all-MiniLM-L6-v2（英文强、中文弱）；reranker 缺失/失败 → 保持 RRF 顺序，行为等同未加 rerank 的版本。两者都不报错，改模型只需换目录，无需改代码。
+- 历史基线（50 题）：纯向量 Recall@1=0.05 → 混合检索 0.580 → +rerank 0.620；MRR@5 0.710。详见 `text/rag/rag-eval.md` §五/§六。
+
 ### ASR 服务
 
 SenseVoice Small int8 ONNX 模型（sherpa-onnx），在 FastAPI lifespan 启动时预加载。返回含情绪标签的识别结果（文本/语种/情绪）。前端通过按住说话→MicRecorder 录制 16kHz PCM WAV→POST /api/asr 上传。
@@ -396,10 +420,11 @@ while (true) {
 | Phase 3 | ✅ 完成 | Live2D 数字人：模型渲染 + 情绪驱动 + 口型同步 + Motion 语境绑定 |
 | Phase 4 | ✅ 完成 | Agent 智能体：LangGraph + 5 工具 + Chroma 记忆 + FAISS RAG |
 
-> **测试与质量现状（2026-08-18 更新）**：后端 141 个测试（unit + integration，2026-08-18 实测）+ RAG 检索评估 3 个（本地手动），行覆盖率 **82%**；
+> **测试与质量现状（2026-08-25 实测）**：后端 141 个测试（unit + integration，141 passed）+ RAG 检索评估 **6 个**（本地手动），核心模块行覆盖率 **74%**（口径：`--cov=backend.agent --cov=backend.tts --cov=backend.asr --cov=backend.routes --cov=backend.main --cov=backend.config`）；
 > 前端 vitest + ESLint 已配置；ruff + mypy + pre-commit/pre-push hooks 全量生效。
 > 测试命令：`python -m pytest backend/tests/ -q --asyncio-mode=auto`（后端，项目根目录执行）、
 > `cd frontend && npm run test`（前端）、`cd backend && ruff check .`（lint）。
+> 全量验证：`bash scripts/verify.sh`（与 CI 对齐，见「常用命令」）。
 > RAG 检索评估（`backend/tests/eval/`）依赖真实 `faiss_data/` 索引 + `DEEPSEEK_API_KEY`，CI 上自动跳过、本地手动跑。
 
 ## 开发顺序约定
@@ -429,15 +454,18 @@ Live2D Cubism SDK for Web 5 官方源码（TypeScript），`frontend/src/live2d/
 | `docs/AI_Agent_数字人助手技术栈学习笔记.md` | 总方案：技术栈选型、情绪系统、口型方案、分阶段计划 |
 | `docs/backend/api.md` | API 文档（SSE 事件格式、请求/响应 schema） |
 | `docs/backend/architecture.md` | 后端架构（路由层、Agent 层、TTS 管线、ASR 模块） |
+| `docs/backend/module-analysis-llm-upgrade.md` | LLM 选型分析（模型对比、升级评估） |
 | `docs/backend/prd-agent.md` | Agent 智能体 PRD（LangGraph、工具、记忆、RAG） |
 | `docs/backend/prd-lipsync.md` | 口型同步 PRD（pypinyin G2P、5 级嘴型、多帧机制） |
 | `docs/backend/prd-voice.md` | 语音交互 PRD（SenseVoice ASR、Edge TTS） |
 | `docs/frontend/prd-live2d.md` | Live2D 集成方案（SDK、组件架构、React 封装） |
 | `docs/frontend/prd-emotion-expression.md` | 情绪表情 PRD（8 种情绪、Live2D 参数映射） |
 | `docs/frontend/prd-motion-context.md` | Motion 语境绑定 PRD（待机/关键词触发/恢复、优先级体系） |
+| `docs/frontend/prototype-chatpanel.md` | ChatPanel HITL 工具确认条 ASCII 原型（`HITL_ENABLED=true` 时出现） |
 | `docs/frontend/prototype-phase1-chat.md` | Phase 1 聊天界面 ASCII 原型 |
 | `docs/frontend/dependencies.md` | 各 Phase 依赖清单 |
 | `docs/phase3-summary.md` | Phase 3 完成总结（交付清单、架构决策、Bug 记录、遗留问题） |
+| `docs/Live2D_数字人问题解决方案.md` | Live2D 常见问题定位与解决方案总览 |
 | `docs/phase2-summary.md` | Phase 2 完成总结（ASR/TTS/G2P/Viseme 管线、录放音、音画同步） |
 | `docs/phase1-summary.md` | Phase 1 完成总结（SSE 流式、情绪标签、会话记忆、聊天 UI） |
 | `Agent.md` | 共享知识库索引（经验文档触发机制、命名规范、架构规则） |

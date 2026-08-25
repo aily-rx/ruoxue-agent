@@ -31,7 +31,8 @@ echo ""
 
 # ---- 后端 ----
 check "ruff"        ruff check backend/
-check "mypy"        mypy backend/ --ignore-missing-imports --explicit-package-bases
+# --exclude .*venv.*: 与 CI 一致（本地 backend/venv 是运行时产物，mypy 扫描会误报第三方文件）
+check "mypy"        mypy backend/ --ignore-missing-imports --explicit-package-bases --exclude ".*venv.*"
 check "pytest"      python -m pytest backend/tests/ -q --asyncio-mode=auto
 
 # ---- 前端 ----
