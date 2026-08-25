@@ -86,8 +86,11 @@ open http://localhost:8000/docs
 `scripts/verify.sh` 与 `.github/workflows/ci-cd.yml` 逐条对齐（ruff → mypy → pytest → eslint → vitest → Docker 构建 → 技能硬约束检查）。**声称"没问题了/ALL PASSED"之前必须先跑它并看到全部 PASS**：
 
 ```bash
-bash scripts/verify.sh   # Windows 用 Git Bash；需 Docker 可用（有 docker-backend/frontend 两步）
+bash scripts/verify.sh               # Windows 用 Git Bash；需 Docker 可用（有 docker-backend/frontend 两步）
+bash scripts/verify.sh --with-eval   # 强制包含 eval 深度评估（30+ 分钟，真调 API）
 ```
+
+**pytest 分支**：自动检测本次改动是否涉及 RAG 链路（`rag_service.py` / `reranker.py` / `backend/tests/eval/` / `text/rag/` / `config.py` 中 RAG_ 配置行）——涉及则全量跑（含 eval）；未涉及只跑 unit+integration 快速体检（约 1 分钟），与 CI 实际执行一致（CI 上 eval 无知识库/无 Key 自动跳过）。改 RAG 代码后手动深检：`python -m pytest backend/tests/eval/ -v`。
 
 ## Docker 部署（2026-08-18 配置）
 
